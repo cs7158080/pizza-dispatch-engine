@@ -1,0 +1,8 @@
+# Normalize line endings to LF in the repository.
+# Windows checkouts stay CRLF-friendly, but files that run inside Linux
+# containers (shell scripts, entrypoints, Dockerfiles) must never carry CRLF.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary

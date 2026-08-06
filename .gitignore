@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code
+#   Shared team config (.claude/settings.json, .claude/commands/) is committed.
+#   Personal, machine-local overrides are not.
+.claude/settings.local.json
