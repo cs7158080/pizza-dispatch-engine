@@ -982,9 +982,17 @@ the same directory, one per atomic unit from Part 4.
   *Why now:* documentation is updated in the same commit as the change (§7), so the list must exist before those commits happen.
   *Source:* R19, `CLAUDE.md` §7.
 
-- **13.5 `docs/ai-log.md`.** `[open]`
-  *Decide:* its columns, and what counts as a loggable event on this project.
-  *Why now:* §6 requires the row to be written as part of the same change; the format must exist before the first rejection. One rejection has already occurred during planning and is a candidate first row.
+- **13.5 `docs/ai-log.md`.** `[decided]`
+  *Decision:* **nothing to decide — the file already exists and defines itself.** It specifies
+  a five-column table (`Date`, `Area`, `Agent proposed`, `Decision`, `Why`), a closed set of
+  decisions (`Rejected`, `Changed`, `Accepted — unverified`), and explicit rules for when a row
+  is and is not warranted. That format is adopted as-is.
+  *State:* the first real row was recorded on 2026-08-07 (the rejected FW11 entry), and the
+  example rows were removed, as the file's own instructions require once real entries exist.
+  *Working rule for the rest of the project:* a row is added only for what becomes
+  **unrecoverable** when the session ends. Design proposals that were rejected or changed
+  during planning are already preserved in this file's `Rejected:` lines, so they do not earn
+  a second record; rejections that leave no trace anywhere else do.
   *Source:* `CLAUDE.md` §6.
 
 - **13.6 Assumptions register.** `[open]`
