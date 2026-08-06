@@ -29,17 +29,10 @@ One row per event. Keep each cell to a single line.
 
 `Decision` is one of: `Rejected`, `Changed`, `Accepted — unverified`.
 
-### Example rows (delete once real entries exist)
-
-| Date | Area | Agent proposed | Decision | Why |
-|---|---|---|---|---|
-| 2026-08-08 | worker/retry | Requeue the message immediately on failure | Rejected | Hot loop — no delay between attempts, floods the log and pins the CPU |
-| 2026-08-08 | worker/dispatch | Plain lookup for the first available driver | Changed | Two workers can select the same row; needs atomic claim at the database level |
-| 2026-08-09 | compose/tests | Fixed wait before starting the test service | Rejected | Flaky by construction; replaced with real service health conditions |
-
 ---
 
 ## Log
 
 | Date | Area | Agent proposed | Decision | Why |
 |---|---|---|---|---|
+| 2026-08-07 | plan/future-work | FW11 — a future-work entry for drivers carrying more than one order | Rejected | Item 5.8 already records the decision and everything it would reopen; a second entry duplicates it |
