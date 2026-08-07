@@ -36,3 +36,6 @@ One row per event. Keep each cell to a single line.
 | Date | Area | Agent proposed | Decision | Why |
 |---|---|---|---|---|
 | 2026-08-07 | plan/future-work | FW11 — a future-work entry for drivers carrying more than one order | Rejected | Item 5.8 already records the decision and everything it would reopen; a second entry duplicates it |
+| 2026-08-07 | plan/scope-ceiling | Item 1.1 to auto-write a Part 5 entry whenever a candidate fails the ceiling test | Changed | Writing the entry is a file change and needs approval per §1; the rule fixes the verdict, not the authority to record it |
+| 2026-08-07 | plan/structure | Splitting the planning record into three files by topic | Changed | Cross-references cluster by risk, not by topic, so a topic split would scatter them; split by role instead — questions, answers, plan |
+| 2026-08-07 | plan/structure | Reconstructing the question form of the 31 items decided before the inventory was separated | Rejected | Writing a question after knowing its answer is fiction; the gap is stated in the file header instead |
