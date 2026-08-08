@@ -98,6 +98,9 @@ recorded.
   lost because the broker was briefly unreachable. Out of scope because it adds a table, a
   relay process, and its own failure modes for a reliability level the assignment does not ask
   for.
+  *Half of it is already built:* 7.5 writes every event into an `outbox` table transactionally.
+  What FW2 adds is the **relay** — the loop that publishes rows with `published_at IS NULL` and
+  marks them — plus its compose service.
 
 - **FW3 — Driver endpoints beyond registration.** Listing drivers, changing availability after
   registration, and **driver order history** (`GET /drivers/{id}/orders`). The history is

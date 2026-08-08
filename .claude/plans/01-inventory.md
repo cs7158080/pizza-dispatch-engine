@@ -164,17 +164,25 @@ gaps surfaced.*
 - **3.3 Code sharing between API and worker.**
   *Decide:* one shared installable package, duplicated modules, or two independent services sharing only a wire contract.
   *Why now:* determines repository layout, Dockerfiles, and whether a rule change touches one place or two.
-  *Source:* R20, `CLAUDE.md` §3.
+  *Source:* R20, `CLAUDE.md` §3. *Constrained by 7.5* — FW2 adds a **second** long-running
+  non-HTTP process (the outbox relay) alongside the worker. Whether the layout makes a second
+  such process cheap — a module plus a compose entry — or forces the worker's plumbing to be
+  duplicated, is settled here. **The tension is explicit:** `CLAUDE.md` §3 forbids structure
+  the current scope does not require, and the scope requires exactly one background process.
+  The outbox table is built (7.5); the relay is not.
 
 - **3.4 The interfaces the core exposes to adapters.**
   *Decide:* order repository, driver repository, event publisher, clock, id generator — names and exact typed signatures.
   *Why now:* Phase 3 steps must be implementable without judgement calls; these interfaces are the contract those steps are written against.
-  *Source:* `CLAUDE.md` §3 ("explicit typed boundaries"), §2 Phase 3.
+  *Source:* `CLAUDE.md` §3 ("explicit typed boundaries"), §2 Phase 3. *Constrained by 7.5* —
+  the event-publisher signature carries no AMQP terms (no exchange, routing key or channel),
+  so a non-broker implementation can satisfy it.
 
 - **3.5 Transaction ownership.**
   *Decide:* which layer opens and commits a transaction, and whether the core may know transactions exist.
   *Why now:* determines whether "assign driver + mark BUSY" can be atomic (F2).
-  *Source:* R8, `CLAUDE.md` §3.
+  *Source:* R8, `CLAUDE.md` §3. *Constrained by 7.5* — the transaction is owned by the use
+  case, and the publish call is one identified line relative to the commit.
 
 - **3.6 Where the CLI sits.**
   *Decide:* a pure HTTP adapter over the API, or a component with logic of its own.
@@ -184,7 +192,8 @@ gaps surfaced.*
 - **3.7 Number of Docker images.**
   *Decide:* one shared image with different commands, or separate images per service (api / worker / cli / tests).
   *Why now:* shapes the build steps and the compose file, both of which appear early in the plan.
-  *Source:* R14, R15.
+  *Source:* R14, R15. *Constrained by 7.5, via 3.3* — the relay FW2 adds should not require an
+  image beyond what the worker already establishes.
 
 - **3.8 Whether the worker uses the same core as the API.**
   *Decide:* worker writes through the shared core and repositories, or has its own data path.
@@ -268,12 +277,14 @@ gaps surfaced.*
 - **7.2 `ORDER_READY` payload schema.**
   *Decide:* fields, event id, event type, timestamp, and whether the event carries an order snapshot or only an identifier.
   *Why now:* it is a typed cross-service boundary (§3) and appears in the sequence diagram.
-  *Source:* R5, R6, R17, `CLAUDE.md` §3.
+  *Source:* R5, R6, R17, `CLAUDE.md` §3. *Constrained by 7.5* — the event carries an
+  `event_id` generated once at creation; it is also the outbox row's key.
 
 - **7.3 Serialization and version marker.**
   *Decide:* encoding, and whether a schema version field exists.
   *Why now:* part of the same contract as 7.2.
-  *Source:* R5, R6.
+  *Source:* R5, R6. *Constrained by 7.5* — the wire bytes are produced by a function on the
+  event, not inline at the publish site, so exactly one component defines the format.
 
 - **7.4 Durability.**
   *Decide:* persistent messages, durable queues, and what happens to in-flight events across a broker restart.
@@ -293,7 +304,8 @@ gaps surfaced.*
 - **7.7 Connection lifecycle.**
   *Decide:* connection/channel per request or long-lived, and reconnection behaviour on both sides.
   *Why now:* affects the publisher interface signature (3.4) and worker resilience (R10).
-  *Source:* R5, R10.
+  *Source:* R5, R10. *Constrained by 7.5* — the publisher's reconnect-once behaviour is fixed
+  there; connection lifetime and the consumer side remain open.
 
 
 ## Topic 8 — Worker
@@ -357,7 +369,8 @@ gaps surfaced.*
 - **10.4 Which values are tunable.**
   *Decide:* retry delay, retry cap, prefetch, ports, log level — tunable or fixed.
   *Why now:* tests may need to tune them (e.g. a short retry delay) to stay fast and deterministic.
-  *Source:* R16, `CLAUDE.md` §5.
+  *Source:* R16, `CLAUDE.md` §5. *Constrained by 7.5* — one publish-attempt timeout, default
+  5 s; with the single reconnect a `PATCH` blocks for at most roughly twice that.
 
 - **10.5 Local credentials.**
   *Decide:* default database and broker credentials, and how they are supplied without being hardcoded.
@@ -559,18 +572,18 @@ gap the assignment left. **Phase 2 does not end while any row is open.**
 | **Q18** | The broker and database choices interact: transactional claiming is easier in one database, delayed retry is easier in one broker. They must be chosen as a pair, not independently. | 2.1, 2.2, 8.2, 8.9 | **answered → A1** |
 | **Q19** | The diagram shows "Interactive CLI / REST client" as alternatives. Must the CLI cover **all** operations, including status updates that the demo needs, or only the three named ones? | 9.2 | **answered → A18** |
 | **Q20** | The development host is Windows; the delivery target is Docker on an unknown host. The assignment does not address line endings, entrypoint scripts, or CLI TTY behaviour. | 9.6, 11.9 | **answered → A21** |
-| **Q21** | R5 requires a publish on a status change, but the status change and the publish are writes to **two systems that cannot be committed atomically**. One must happen first, and if the second fails the system is left inconsistent. Which failure is accepted — a **phantom event** (published, then the commit failed: the worker sees an order the database never advanced) or a **lost event** (committed, then the publish failed: the order is `BAKING` forever and no driver is ever dispatched, silently)? The assignment says the event *must* be published and says nothing about what happens when it cannot be. | 7.5, 7.6, 6.6, F4 | **open** |
+| **Q21** | R5 requires a publish on a status change, but the status change and the publish are writes to **two systems that cannot be committed atomically**. One must happen first, and if the second fails the system is left inconsistent. Which failure is accepted — a **phantom event** (published, then the commit failed: the worker sees an order the database never advanced) or a **lost event** (committed, then the publish failed: the order is `BAKING` forever and no driver is ever dispatched, silently)? The assignment says the event *must* be published and says nothing about what happens when it cannot be. | 7.5, 7.6, 6.6, F4 | **answered → A22, A23** |
 
 *Q21 was appended on 2026-08-07. It is not a new ambiguity — it was always in R5 — but no
 question had been written for it, so item 7.5 sat open with nothing scheduled to resolve it.
 It is the assignment's central reliability trade-off and the most likely interview question
 about the design.*
 
-**Answering order.** Q1–Q20 are answered; the order taken was
-Q18 → Q1 → Q2 → Q4 → Q13 → Q6 → Q8 → Q3 → Q5 → Q9 → Q10 → Q14 → Q11 → Q12 → Q7 → Q16 → Q19 → Q17 → Q15 → Q20.
-**Q21 is next, and 7.5, 7.6 and 6.6 are decided together as one unit** — 6.6 already records
-that its own open coupling cannot be resolved before 7.6, and 7.6 cannot be resolved before
-7.5. Units U6 and U7 in the roadmap are blocked until all three close.
+**Answering order.** All 21 are answered; the order taken was
+Q18 → Q1 → Q2 → Q4 → Q13 → Q6 → Q8 → Q3 → Q5 → Q9 → Q10 → Q14 → Q11 → Q12 → Q7 → Q16 → Q19 → Q17 → Q15 → Q20 → Q21.
+**Q21 was answered last, on 2026-08-09, with 7.5, 7.6 and 6.6 decided as one unit** — 6.6
+could not resolve its own open coupling before 7.6, and 7.6 could not be resolved before 7.5.
+That unblocks units U6 and U7 in the roadmap.
 
 ---
 

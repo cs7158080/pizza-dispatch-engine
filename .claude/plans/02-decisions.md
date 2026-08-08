@@ -23,7 +23,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 4 — Data model | 4.2, 4.3, 4.4, 4.8 | 4.1, 4.5, 4.6, 4.7 |
 | 5 — Business rules | 5.1, 5.2, 5.3, 5.5, 5.6, 5.8 | 5.4, 5.7 |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
-| 7 — Broker contract | — | 7.1–7.7 |
+| 7 — Broker contract | 7.5, 7.6 | 7.1–7.4, 7.7 |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.6 | 9.1, 9.3, 9.4, 9.5 |
 | 10 — Configuration | — | 10.1–10.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | — | 12.1–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **37** | **72** |
+| **Total** | **39** | **70** |
 
 Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
 
@@ -419,8 +419,8 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   query and the detail endpoint is unchanged.
   *Assumptions recorded:* the cap of 50 and "newest first" are chosen, not required; there is
   no paging because nothing needs it at this scale.
-  **`GET /health`.** It returns `200` when the application can reach the database and the
-  broker, `503` otherwise — no metrics, no version, no uptime, no per-dependency detail.
+  **`GET /health`.** It returns `200` when the application can reach the database, `503`
+  otherwise — no metrics, no version, no uptime, no per-dependency detail.
   *Why it is not scope creep:* it is infrastructure the deliverable requires, not a user-facing
   capability. R15 says the suite runs at launch, 11.2 says readiness is condition-based, and
   `CLAUDE.md` §5 forbids fixed sleeps. Those three can only hold together if something can be
@@ -432,10 +432,13 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   failure; probing an existing endpoint such as `GET /orders/<random-uuid>` and accepting `404`
   — it works, but health would be defined by a not-found, and any later change to that
   endpoint silently changes what "healthy" means.
-  *Open coupling:* whether `/health` treats the broker as a health dependency follows 7.6. If a
-  `PATCH` fails when the broker is unreachable, an API without a broker genuinely cannot serve
-  and must report `503`; if the `PATCH` succeeds and the event is lost, the broker is not a
-  health condition. **Revisit with 7.5 and 7.6 — the three are one decision.**
+  *Resolved with 7.5 and 7.6 on 2026-08-09 — this replaces an open coupling recorded here.*
+  `/health` reports on the **database only**. 7.6 makes a status update succeed when the broker
+  is unreachable, so an API without a broker serves every endpoint correctly and a `503` would
+  be false. Compose gates the broker on its own `rabbitmq-diagnostics ping` (11.2), so nothing
+  is left unwatched. *Noted:* in plain Compose an unhealthy container is not restarted — a
+  healthcheck only gates `depends_on: condition: service_healthy` — so this choice affects
+  startup ordering, not runtime restarts.
   *Source:* R11, R14, `CLAUDE.md` §6, 1.1. *Answers:* Q11, Q12.
 
 - **6.8 Authentication.** `[decided]`
@@ -446,6 +449,93 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   would be an unrequested feature (`CLAUDE.md` §6); leaving it unmentioned would be an
   unstated assumption (§7). Stating the absence satisfies both.
   *Source:* `CLAUDE.md` §7. *Answers:* Q15. *Deferred to:* FW9.
+
+
+## Topic 7 — Broker contract
+
+- **7.5 Publish versus commit ordering.** `[decided]`
+  *Decision:* three parts.
+  **Ordering** — the `ORDER_READY` publish happens **after** the database transaction commits,
+  from the application layer, inside the request. The accepted failure is a **lost event**.
+  **Record** — the same transaction that writes the status change also inserts a row into an
+  `outbox` table (`event_id`, `event_type`, `payload`, `created_at`, `published_at` nullable).
+  A successful publish sets `published_at`. **There is no relay** — nothing acts on unpublished
+  rows.
+  **Attempt** — publishing uses **publisher confirms**, so failure is detectable. A publish
+  that fails on an established connection is retried **exactly once, after reconnecting**;
+  failure to establish the new connection is final. Each attempt is bounded by an env-tunable
+  timeout (10.4), so a `PATCH` blocks for at most twice that bound.
+
+  *Why after commit:* publishing inside the transaction would hold it open across a network
+  call to a second system. `UPDATE orders …` takes a row-level exclusive lock that PostgreSQL
+  releases only at `COMMIT`, so the lock — and the pooled connection — would be held for a full
+  broker round trip, which confirms make a round trip by definition. The worker's claim path
+  (8.9) writes the same rows and would block behind it. That turns a broker fault into a
+  database fault: two dependencies that are independent by design become coupled by
+  implementation. Committing first keeps the transaction local and short.
+
+  *Why the phantom event was not preferred, despite being benign:* published-then-rollback is
+  genuinely mild here — 5.5's guard reads "no driver yet and not delivered" and never reads
+  status, so a phantom assigns a driver to an order still at `PREPARING`; the client's retry
+  then succeeds, the second event is a no-op, and `DELIVERED` still releases the driver. The end
+  state is correct. It is also the more orthodox choice — at-least-once with an idempotent
+  consumer — and 5.5 supplies that consumer for free. It was rejected on the locking argument
+  above, not on its outcome. **This is the closest call in the record.**
+
+  *Why an outbox table with no relay:* it buys the durable half of FW2 for a fraction of its
+  cost. The insert is atomic with the status change, so a lost event leaves a permanent,
+  queryable row instead of an `ERROR` line that scrolls past — and FW2 is reduced to writing
+  the relay loop.
+  *This is an explicit exception to 1.1.* Delete the table and no named DoD row fails, so the
+  ceiling test says do not build it. It is built anyway, by decision, because it records the one
+  failure this design cannot repair. What 1.1 forbids is an item left unbuilt and unrecorded to
+  be "kept in mind" — not a costed decision to spend.
+
+  *The cost this design does not repair, stated in full:* R5 publishes twice, so a single
+  failure at `BAKING` is covered by the publish at `READY`, and the reconnect above removes the
+  most common failure — a stale connection — before that. But if the broker is unreachable
+  across **both** transitions, the event is never published and **no driver is ever dispatched
+  for that order**. It reaches `DELIVERED` unassigned. Two things soften this and neither
+  repairs it: the order shows `assignment_state = PENDING` while its status advances, which is
+  4.4's designed signal and is visible in `GET /orders/{id}`, `GET /orders` and the CLI; and the
+  outbox holds a row with `published_at IS NULL` naming exactly which event was lost.
+  **Recorded as an explicit assumption and stated in the README.**
+
+  *Rejected:* **publish before commit** — see above. **A transactional outbox with a relay
+  (FW2)** — it removes the window entirely and stays out of scope: a relay is a third process
+  with its own failure modes, and testing it requires stopping and restarting the broker
+  mid-suite, consuming one of the four scenarios R18 allows. **A reconciliation sweeper** — a
+  loop republishing orders stuck at `BAKING`/`READY` with `assignment_state = PENDING`. It works
+  and costs less than a relay, but it makes `assignment_state` answer two questions at once:
+  "no driver yet" is also the normal state of an order legitimately retrying (F7), so the
+  sweeper would republish healthy orders and race 8.2's dead-letter retry, resetting its attempt
+  budget on every pass. Separating the two needs a threshold timestamp — reopening 4.8 — and a
+  marker, at which point it is an outbox. **A `published` flag on the order** — wrong
+  granularity: R5 emits two events per order and one boolean cannot say which was lost. Its only
+  possible reader was the sweeper; the outbox row records the same fact at the right
+  granularity.
+  *Source:* R5, `CLAUDE.md` §3, §7. *Answers:* Q21. *Defines:* F4 with 7.6. *Constrains:* 3.3,
+  3.4, 3.5, 3.7, 7.2, 7.3, 10.4. *Partly answers:* 7.7 — the publisher's reconnect behaviour
+  only; connection lifetime and the consumer side stay open.
+
+- **7.6 Behaviour when the broker is unreachable during a status update.** `[decided]`
+  *Decision:* the `PATCH` **succeeds** — `200` with the updated order. The publish failure is
+  recorded as one `ERROR` log line and the unpublished `outbox` row (7.5). No `5xx`, and no
+  field on the order marking it.
+  *Why not an error code:* the commit already happened, so the status genuinely changed. A
+  `5xx` would report a failure that did not occur — and the client's natural repair makes it
+  worse: the order is already at `BAKING`, and 5.1 makes re-sending the current status illegal,
+  so the retry returns `409`. The caller would be told "failed", act correctly on it, and be
+  told "illegal". An error the caller cannot recover from is worse than a success that is
+  partially incomplete.
+  *Why nothing is written to the order:* `assignment_state = FAILED` is the obvious candidate
+  and it breaks — the publish at `READY` may still succeed, after which the worker assigns a
+  driver, requiring a `FAILED → ASSIGNED` transition that 4.4 does not have. `PENDING` on an
+  order whose status has advanced already reads as "no driver is coming", which is the same
+  information without a new state.
+  *Rejected:* `503` — above; `202 Accepted` — it describes the request as pending when the
+  state change is already durable, and nothing later completes it.
+  *Source:* R5, `CLAUDE.md` §5. *Answers:* Q21. *Defines:* F4 with 7.5.
 
 
 ## Topic 8 — Worker
@@ -752,15 +842,19 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A12** | `GET /orders/{id}` returns a nested driver object, or `null` | 6.5 |
 | **A13** † | Exactly one active order per driver | 5.8 |
 | **A14** † | `GET /orders` exists — light list, newest first, capped at 50 | 6.6 |
-| **A15** † | `GET /health` exists — `200` when the database and broker are reachable, `503` otherwise | 6.6 |
+| **A15** † | `GET /health` exists — `200` when the database is reachable, `503` otherwise | 6.6, 7.5 |
 | **A16** | The mock dispatch notification is one structured `INFO` log line, and not a test assertion target | 8.6 |
 | **A17** † | "3–4 automated tests" means four integration scenarios; unit tests are separate and uncounted | 12.6 *(partial)* |
 | **A18** | The CLI covers status updates as well as the three operations R11 names | 9.2 |
 | **A19** † | The environment is disposable — no named volumes, `docker compose down` is the reset | 11.7 |
 | **A20** † | No authentication or authorisation | 6.8, FW9 |
 | **A21** | Windows-to-Linux friction is handled by configuration and documentation, not code | 9.6 |
+| **A22** † | `ORDER_READY` is published after the commit; if the broker is unreachable the `PATCH` still returns `200` and the event is lost | 7.5, 7.6 |
+| **A23** † | Every event is recorded in an `outbox` table, but nothing replays unpublished rows | 7.5 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".
 It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the structure is now
 FW11. A12 previously described the nested driver as produced by a `LEFT JOIN`, which
 contradicted 6.5's decision to use two keyed reads. **6.5 is authoritative**; the register no
+longer names a read mechanism at all. A15 was narrowed on 2026-08-09: it previously required
+the broker to be reachable for `/health` to return `200`, which 7.6 made false.
