@@ -12,12 +12,12 @@ weighed.
 
 ## Status
 
-**Authoritative.** The `[open]` markers in `01-inventory.md` record each item's state when it
-was written and are not maintained; this table is.
+**Authoritative, and the only place item status is recorded.** `01-inventory.md` carries no
+status markers, precisely so that this table cannot be contradicted.
 
 | Topic | Decided | Open |
 |---|---|---|
-| 1 — Scope and time | 1.1, 1.3, 1.5 | 1.2, 1.4 |
+| 1 — Scope and time | 1.1, 1.3, 1.4, 1.5 | 1.2 |
 | 2 — Stack and tooling | 2.1, 2.2, 2.3 | 2.4–2.10 |
 | 3 — Architecture and layering | — | 3.1–3.8 |
 | 4 — Data model | 4.2, 4.3, 4.4, 4.8 | 4.1, 4.5, 4.6, 4.7 |
@@ -29,9 +29,9 @@ was written and are not maintained; this table is.
 | 10 — Configuration | — | 10.1–10.5 |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | — | 12.1–12.10 *(12.6 partial)* |
-| 13 — Documentation | 13.5 | 13.1–13.4, 13.6 |
+| 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **35** | **74** |
+| **Total** | **37** | **72** |
 
 Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
 
@@ -41,7 +41,7 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
 
 ## Topic 1 — Scope and time
 
-- **1.1 Scope ceiling.** `[decided]`
+- **1.1 Scope ceiling for the 4-day budget.** `[decided]`
   *Decision:* the delivered system is **exactly R1–R23 and nothing more**. Anything not
   traceable to a numbered requirement ships only if it passes one test:
   **delete it — which named DoD row now fails?** If the answer is "none", it is **not built**,
@@ -99,6 +99,21 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   reached 1,373 lines at 28% complete. **One line for everything** — cheap, and it discards
   exactly the material R23 asks for.
   *Source:* R23, `CLAUDE.md` §2. *Governs the depth of every record in this file.*
+
+- **1.4 Where Phase 2 decisions are recorded.** `[decided]`
+  *Decision:* in **`02-decisions.md`** — this file — one record per inventory item, numbered
+  from the inventory. The README carries a short trade-off summary, assembled from these
+  records in U13 (13.4); it is a derived view, never a second original.
+  *Why:* the alternative that was actually in force — recording each decision inline in the
+  inventory item — is what this restructure had to undo. It overwrote the question with its
+  answer, so Phase 1 left no artifact at all, and the same fact ended up stated in two places
+  and eventually disagreed with itself. Separating the two makes each phase readable on its
+  own and gives the README exactly one source to draw from.
+  *Rejected:* **inline in the inventory** — the prior state, described above.
+  **The README's trade-off section as the primary record** — it is written for a reader who
+  has never seen the project, so it cannot also carry rejected alternatives and accepted costs
+  without becoming unreadable; it is a summary, and a summary cannot be the original.
+  *Source:* `CLAUDE.md` §2 Phase 2, §7. *Realised by:* the three-file split, 2026-08-07.
 
 - **1.5 Per-unit time budget.** `[decided]`
   *Decision:* **no time budget and no per-unit estimates.** Volume is controlled by 1.1 (what
@@ -666,6 +681,21 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   during planning are already preserved in this file's `Rejected:` lines, so they do not earn
   a second record; rejections that leave no trace anywhere else do.
   *Source:* `CLAUDE.md` §6.
+
+- **13.6 Assumptions register.** `[decided]`
+  *Decision:* the assumptions live as a **one-line index** in this file — the assumption
+  stated, and a pointer to the decision that holds its reasoning. No line restates a decision.
+  Entries marked **†** are copied into the README's *Assumptions* section in U13; the rest are
+  internal to planning and stay here.
+  *How it stays current — and this is the whole mechanism:* by carrying no reasoning. An index
+  line can only go stale if the assumption itself changes, and changing an assumption is a
+  decision, which updates its record and its line together. The previous form — a paragraph
+  per assumption — drifted for exactly the opposite reason: it duplicated the reasoning, so
+  A12 went on describing a `LEFT JOIN` after 6.5 had decided on two keyed reads.
+  *Rejected:* **a separate document** — 21 index lines do not earn a file, and a reader
+  following the pointer would have to leave the file that holds the answer.
+  **Full paragraphs, as before** — the form that produced the drift.
+  *Source:* `CLAUDE.md` §7. *Realised by:* the Assumptions section of this file.
 
 
 ## Topic 14 — Git and process
