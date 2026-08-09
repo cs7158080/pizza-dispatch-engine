@@ -119,8 +119,16 @@ recorded.
   covers the reviewer's need to see what happened.
 
 - **FW7 — Verified multi-consumer operation.** Running several worker replicas and proving the
-  claiming race is safe under real contention, rather than by design argument plus a
-  constraint. Depends on what 8.5 and 8.9 decide.
+  claiming race is safe under real contention, rather than by design argument plus a constraint.
+  8.9 already makes the claim safe in code, so this buys evidence rather than safety; what it
+  revisits is 8.5's choice of one replica, taken for test determinism.
+  *What does not change with it, and this is the entry that makes the reason visible:*
+  `prefetch` stays at 1. RabbitMQ dispatches round-robin without regard to how busy a consumer
+  is, so a wide window lets one consumer hold messages it has not started while another sits
+  idle — and messages already handed to a client buffer cannot be taken back. Prefetch 1 is
+  what makes several consumers share work at all: its cost profile inverts the moment there is
+  more than one of them, from mildly useful to actively harmful. 8.5 records the two conditions
+  under which a wider window would be worth revisiting, and "more replicas" is neither of them.
 
 - **FW8 — Persisted dispatch notifications.** Storing dispatch records instead of only logging
   them (8.6), which would make the notification history queryable rather than grep-able.
@@ -138,3 +146,23 @@ recorded.
   order's contents: pricing, a kitchen display, per-item preparation times. Excluded under
   1.1 because nothing in the delivered system reads `items`, so no DoD row degrades without
   it. Note that this is a **widening** change to the API contract, not a breaking one.
+
+- **FW12 — Asynchronous runtime.** Moving the system to `async` — `async def` handlers, an async
+  database driver, `aio-pika`, an async suite — so that a request waiting on the broker or the
+  database releases its thread instead of holding it. 2.4 chose synchronous and named the
+  condition that would turn the trade over; this is the record of what happens when it does.
+  *Why it is not in scope:* the concurrency it optimises does not exist. 8.5 runs one worker
+  replica at prefetch 1, and the API serves one interactive CLI user plus four sequential test
+  scenarios.
+  *What would trigger it:* raising prefetch above 1, running worker replicas (FW7), or genuinely
+  concurrent API traffic — most visibly across 7.5's publish window, where a `PATCH` against an
+  unreachable broker occupies a thread-pool thread for up to twice the configured timeout.
+  *What it touches, and why it is not a small change:* unlike FW11 this is not additive. 3.5's
+  `UnitOfWork` becomes `__aenter__` / `__aexit__` / `async def commit`; every repository method
+  and every use case is coloured with it; U4's unit tests need an async pytest plugin, losing
+  the "free" status `CLAUDE.md` §5 admits them under; and SQLAlchemy's async support pulls in
+  `greenlet`. `domain/` is the one layer that does not change — the entities are values and
+  reach for nothing.
+  *One thing it would simplify:* the publisher thread-safety obligation 2.4 hands to 7.7
+  disappears. A single event loop serialises channel access by construction, so no lock is
+  needed.

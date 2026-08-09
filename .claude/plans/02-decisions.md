@@ -18,7 +18,7 @@ status markers, precisely so that this table cannot be contradicted.
 | Topic | Decided | Open |
 |---|---|---|
 | 1 — Scope and time | 1.1, 1.3, 1.4, 1.5 | 1.2 |
-| 2 — Stack and tooling | 2.1, 2.2, 2.3 | 2.4–2.10 |
+| 2 — Stack and tooling | 2.1, 2.2, 2.3, 2.4 | 2.5–2.10 |
 | 3 — Architecture and layering | 3.1, 3.2, 3.3, 3.5, 3.6, 3.8 | 3.4, 3.7 |
 | 4 — Data model | 4.2, 4.3, 4.4, 4.8 | 4.1, 4.5, 4.6, 4.7 |
 | 5 — Business rules | 5.1, 5.2, 5.3, 5.5, 5.6, 5.8 | 5.4, 5.7 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | — | 12.1–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **45** | **64** |
+| **Total** | **46** | **63** |
 
 Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
 
@@ -160,6 +160,65 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   *Runtime-neutral:* FastAPI supports both synchronous and asynchronous route handlers, so this
   decision does not pre-empt 2.4.
   *Source:* R12, `CLAUDE.md` §3 ("external input is validated at the edge").
+
+- **2.4 Sync or async runtime.** `[decided]`
+  *Decision:* **synchronous throughout** — `def` route handlers, a blocking consumer loop, a
+  blocking CLI, a synchronous test suite. The two services match, and that is structural rather
+  than stylistic: 3.8 gives them one `UnitOfWork` `Protocol`, and one `Protocol` cannot be sync
+  in one process and async in another without a second port and a second implementation of every
+  repository — which is what 3.3 rejected when it rejected duplicated modules.
+
+  *The rule, written so it can be checked in a diff:* **no `async def` under `src/pizza/`, and
+  no `await` under `domain/` or `application/`.** The single exception is the ASGI `lifespan`
+  hook in `entrypoints/api/main.py`, which FastAPI defines as an async context manager; it holds
+  composition-root wiring only (3.1) and never calls into `application/`. Its blocking
+  construction work runs at startup, when nothing is being served.
+  *Why the rule earns its place independently of the choice:* FastAPI runs a `def` handler in a
+  thread pool and an `async def` handler on the event loop, so a mixed codebase is one careless
+  `async def` away from a handler that blocks the loop and serialises every request in the
+  process. Naming one colour removes that failure mode instead of managing it.
+
+  *Why synchronous — there is no concurrency to exploit.* 8.5 fixes the worker at one replica
+  with prefetch 1, so it holds exactly one message at a time; an event loop exists to overlap
+  I/O waits across concurrent tasks, and there is only ever one task. The API serves an
+  interactive CLI driven by one person (9.2) and four integration scenarios (A17). Async is
+  measured in concurrent connections, and this design has no such number.
+
+  *Why keeping the core uncoloured is the deciding cost.* Stated precisely, because the
+  overstatement is available and wrong: `async` is a language keyword, not a library, so an
+  async core would still pass 3.1's framework-free test. This is a simplicity argument, not a
+  layering one. What it costs is concrete — every port method, every use case and 3.5's `with`
+  acquire `async`, and U4's unit tests need an async pytest plugin, so they stop being what
+  `CLAUDE.md` §5 permits them as: "pure logic, no infrastructure, written in minutes".
+  `domain/` is untouched either way; the entities are values.
+
+  *The cost accepted, not hidden:* 7.5's publish runs inside the request with publisher
+  confirms and a bounded per-attempt timeout, so a `PATCH` against an unreachable broker
+  occupies one thread-pool thread for up to twice that bound (10.4 defaults it to 5 s). On an
+  event loop the wait would cost nothing. Against FastAPI's default pool of 40 threads and the
+  concurrency above the thread is affordable — but it is a real cost, not an absent one.
+
+  *The obligation this hands onward, recorded here so it is not improvised in U6:* `pika` is not
+  thread-safe, and a synchronous FastAPI serves handlers from a thread pool, so two concurrent
+  `PATCH` requests sharing one channel would interleave frames on it. The publisher adapter must
+  be safe under the pool — a lock around `publish`, or a connection per publish. 7.7 owns which.
+
+  *Rejected:* **asynchronous throughout** — the coherent alternative, and not a straw one: an
+  async core, psycopg's async interface or `asyncpg`, `aio-pika`, an async suite. It is
+  FastAPI's idiomatic mode, it frees the thread the publish holds, and its publisher story is
+  genuinely cleaner, because one event loop serialises channel access for free and the
+  obligation above disappears. It was rejected because the concurrency it optimises does not
+  exist here, while its price is paid in the layer R20 is graded on; SQLAlchemy's async support
+  additionally pulls in `greenlet`, and 3.5's `Protocol` would need amending.
+  **A mixed runtime** — an async API over a sync worker: two ports and two repository
+  implementations for one shared core, and it is precisely the arrangement that produces the
+  blocked-event-loop bug above.
+
+  *Conditional, and the condition is named:* this holds while concurrency is 1. Raising
+  prefetch, adding worker replicas, or putting the API under real concurrent traffic is what
+  turns the trade over — **FW12**.
+  *Source:* R12, `CLAUDE.md` §3. *Constrained by:* 3.5, 3.8, 8.5. *Constrains:* 2.5, 2.6, 2.7,
+  3.4, 7.7. *Deferred to:* FW12.
 
 
 ## Topic 3 — Architecture and layering
@@ -904,9 +963,37 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   *Why:* a single consumer keeps the integration tests deterministic (`CLAUDE.md` §5) and
   keeps message order per queue trivially preserved. Ordering is not load-bearing anyway,
   since every rule in 5.5 and 5.6 is idempotent.
+
+  *Why prefetch 1 specifically, and not only the replica count:* `prefetch` is a flow-control
+  window — the number of unacknowledged messages the broker will hand a consumer — and not a
+  parallelism setting. Under 2.4's synchronous consumer the callback still handles one message
+  at a time whatever the window is, but a wider window is not therefore without effect: with 1
+  the broker withholds the next message until the previous `ack` reaches it and the worker idles
+  for that round trip, while with N the next message is already buffered. **A wider window
+  raises throughput under two conditions — messages arriving faster than they are processed, or
+  a delivery/ack round trip that is significant against the processing time.** This system meets
+  neither. The `PATCH` carries 7.5's publisher-confirm round trip and is driven by a person at a
+  CLI menu (9.2), so the API produces more slowly than the worker consumes and the queue sits
+  empty between events; and broker, worker and database share one Compose host, so the round
+  trip is a fraction of a millisecond against a claim-and-assign transaction of a few. A window
+  wider than the backlog is inert, and pipelining a negligible latency saves a negligible
+  amount.
+  *The one case that does produce a backlog, and it argues for 1 rather than against it:* 8.2's
+  TTL expiry can return several messages at once, each a no-driver rejection — a claim query and
+  no writes. The round trips a wider window would save there are worth single-digit
+  milliseconds, against condition-based test timeouts measured in seconds (12.4). Set against
+  that saving: messages held in a client buffer are unacked and therefore absent from the queue
+  depth, so a wide window hides the backlog from every tool that reports one, and turns 8.2's
+  cycle from one legible attempt per line into a burst in the `docker compose up` output that
+  8.6's log line is written for.
+  *Stated without inflation:* neither setting costs anything measurable at this scale. 1 is
+  chosen for observability, and because it is already what fair dispatch needs on the day FW7
+  adds replicas — not because throughput required it.
+  *Scope of the window:* it governs the main queue only — 8.2's wait queue has no consumer.
+
   *Rejected:* multiple replicas by default — weakens test determinism to demonstrate a scale
   the assignment never asks for.
-  *Source:* R14, DoD. *Answers:* Q13.
+  *Source:* R14, DoD. *Answers:* Q13. *Constrains:* 2.4.
 
 - **8.6 The mock dispatch notification.** `[decided]`
   *Decision:* **one structured log line at `INFO`**, emitted after the assignment transaction
