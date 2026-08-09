@@ -32,7 +32,7 @@ one branch and one commit (`CLAUDE.md` §4).
 | **U2** Configuration | Typed settings object, `.env.example`, config validation at startup | 10 | U1 | U5, U6, U7, U8, U9 |
 | **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7, 4.8, 5 | U1 | U4, U5, U6, U7, U8 |
 | **U4** Core unit tests | Unit tests for the rules identified as infrastructure-free | 5.7, 12.6, 12.7 | U3 | — |
-| **U5** Persistence | Schema and migrations, repository implementations, integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 8.9 | U2, U3 | U7, U8 |
+| **U5** Persistence | Schema and migrations, repository implementations, the `outbox` table and its insert/mark-published operations (7.5), integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 7.5, 8.9 | U2, U3 | U7, U8 |
 | **U6** Broker adapter | Topology declaration, event payload type, publisher implementation, connection lifecycle | 2.1, 2.7, 7 | U2, U3 | U7, U8 |
 | **U7** API service | Routes, edge validation, error format, status-update endpoint including the publish trigger, wiring of core + repositories + publisher | 2.3, 2.4, 6, 7.5, 7.6 | U3, U5, U6 | U9, U12 |
 | **U8** Dispatch worker | Consumer loop, ack/nack policy, retry and dead-letter handling, poison-message handling, dispatch logging, startup/shutdown | 8 | U3, U5, U6 | U9 |
