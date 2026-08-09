@@ -18,7 +18,7 @@ status markers, precisely so that this table cannot be contradicted.
 | Topic | Decided | Open |
 |---|---|---|
 | 1 — Scope and time | 1.1, 1.3, 1.4, 1.5 | 1.2 |
-| 2 — Stack and tooling | 2.1, 2.2, 2.3, 2.4 | 2.5–2.10 |
+| 2 — Stack and tooling | 2.1, 2.2, 2.3, 2.4, 2.5 | 2.6–2.10 |
 | 3 — Architecture and layering | 3.1, 3.2, 3.3, 3.5, 3.6, 3.8 | 3.4, 3.7 |
 | 4 — Data model | 4.2, 4.3, 4.4, 4.8 | 4.1, 4.5, 4.6, 4.7 |
 | 5 — Business rules | 5.1, 5.2, 5.3, 5.5, 5.6, 5.8 | 5.4, 5.7 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | — | 12.1–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **46** | **63** |
+| **Total** | **47** | **62** |
 
 Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
 
@@ -219,6 +219,126 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   turns the trade over — **FW12**.
   *Source:* R12, `CLAUDE.md` §3. *Constrained by:* 3.5, 3.8, 8.5. *Constrains:* 2.5, 2.6, 2.7,
   3.4, 7.7. *Deferred to:* FW12.
+
+- **2.5 Database access approach.** `[decided]`
+  *Decision:* **SQLAlchemy 2.0, declarative ORM, over the synchronous `psycopg` (v3) driver.**
+  Models live in `infrastructure/db/models.py` as **classes separate from the domain entities**;
+  repositories convert between them. One `Engine` per process, built at the composition root;
+  `UnitOfWork.__enter__` opens a `Session` and `__exit__` closes it. The `Session` does not take
+  a connection by itself — SQLAlchemy acquires one from the pool on the first statement and
+  returns it when the transaction ends and the session is closed. A unit of work that touches
+  nothing therefore costs no connection, and no connection is ever held between requests. The
+  API and the worker use the same mechanism — 3.8 settled that, and it is not re-decided here.
+
+  *The two session settings, written explicitly because the defaults are wrong for this design:*
+
+  ```python
+  # entrypoints/{api,worker}/main.py — composition root (3.1)
+  engine  = create_engine(settings.database_url, pool_pre_ping=True)
+  factory = sessionmaker(engine, autoflush=False, expire_on_commit=False)
+  ```
+
+  `autoflush=False` — the default flushes pending writes before every query, at a moment the
+  caller did not choose. 8.9 is a decision about exactly when a row is locked, and an `UPDATE`
+  firing at an unspecified point inside that window is the one thing it cannot tolerate.
+  `expire_on_commit=False` — the default marks every loaded object stale after `commit()`, so
+  reading a field afterwards issues a fresh `SELECT`.
+  **Stated without inflation: neither default causes a defect in any flow decided so far.**
+  Repositories return domain entities, so nothing ORM-shaped escapes them, and in
+  `dispatch_order` the claim query precedes every write. They are set because relying on "no
+  current flow triggers it" is relying on an accident rather than on a rule.
+  `pool_pre_ping=True` is set not for startup ordering — 11.2's healthchecks own that — but for
+  connections that go bad **while idle in the pool**: a database container restart (11.11), a
+  server-side idle timeout, a dropped connection. Without it the failure surfaces on whichever
+  request happens to borrow the dead connection, which is both intermittent and misattributed.
+  It costs one `SELECT 1` per checkout.
+
+  *Why an ORM, when 3.1 and 6.5 between them remove most of what one is for:* the honest
+  starting position is that they do. 6.5 forbids relationship navigation, so `relationship()`,
+  lazy loading and N+1 are not risks managed but a feature never used; and 3.1 already assigns
+  row→entity conversion to the repository, so an ORM does not remove that step. Two things
+  survive, and they are what decided it.
+
+  First, the write-back a separate-entity design needs costs no extra query.
+  `session.get()` resolves from the identity map **when the instance is already loaded in that
+  session and not expired** — which holds on every write path here, because the use case loads
+  the entity through the same `UnitOfWork` before mutating it, and `expire_on_commit=False`
+  keeps it valid afterwards. It is a property of this flow, not a guarantee of the API: `get()`
+  on an id the session has not seen issues a `SELECT` like any other read.
+
+  ```python
+  def save(self, order: Order) -> None:
+      # loaded earlier in this Session and not expired, so this resolves from
+      # the identity map without a SELECT — it would issue one otherwise
+      model = self._session.get(OrderModel, order.id)
+      model.status = order.status.value
+      ...
+  ```
+
+  Second, `Mapped[...]` annotations give the type checker (2.8) a statically known type per
+  column. **Not because Core is untyped** — SQLAlchemy 2.0 types `Column` and `TypeEngine`
+  generically, and a Core query written against column objects held by reference carries those
+  types through. It is the ordinary Core idiom that loses them: `table.c.status` is attribute
+  access on a dynamic collection, so a checker sees `Column[Any]` and the resulting `Row`
+  follows. Declarative arrives at the same place by construction rather than by discipline,
+  which matters most at the row→entity function — the one place where a column/field mismatch
+  would otherwise pass unchecked.
+
+  *What it costs, plainly:* two classes per table and a mapper function per direction. Only
+  imperative mapping avoids it, and it is 3.1's framework-free rule that creates it, not this
+  item.
+
+  *Two units of work, stacked — recorded because it is the likely interview question:* the
+  SQLAlchemy `Session` is itself a unit of work with change tracking. 3.5 put ours above it. We
+  use only its transaction boundary; the tracking half does nothing, because mutation happens on
+  the domain entity and reaches the model only in `save()`. The answer is one sentence — the
+  `Session` is an implementation detail of the adapter, the `UnitOfWork` `Protocol` is what the
+  core sees, and the core cannot tell there is a `Session` underneath.
+
+  *Rejected — **imperative mapping**, mapping the domain entities themselves to tables.* The
+  strongest alternative, and the arrangement *Architecture Patterns with Python* recommends. Its
+  claim is that it removes the duplication above; counted, it does not. `map_imperatively`
+  requires an explicit `Table` object, so the column list is written either way, and what is
+  actually saved is the two mapper functions — about twelve lines against twelve.
+  Against that near-zero saving, `start_mappers()` mutates the domain class globally for the
+  lifetime of the process, so whether U4 sees a clean `Order` depends on whether anything else
+  in the same process has called it. Whether that forces a `clear_mappers()` fixture is **not
+  settled here — it turns on 12.7, which is open**: separate pytest invocations per directory
+  never start the mappers, a single invocation over both does. That is the objection, stated at
+  its real size: an item saving nothing should not change another item's options.
+  Two costs that do not depend on 12.7: SQLAlchemy sets state directly when loading rather than
+  calling `__init__`, so any invariant 4.1 places in the constructor is silently skipped for
+  objects read from the database; and for the same reason a mapped class cannot be a frozen
+  dataclass, which moves the question of what an entity may be out of 4.1 and into the
+  persistence layer. **What it does not do, and the record says so because the argument would
+  otherwise lose:** it adds no import to `domain/`, so 3.1's framework-free test passes under it.
+  The coupling is runtime instrumentation, conditional on a call made elsewhere — which is why
+  the rejection rests on the two concrete costs above and on the counted saving, not on the
+  principle.
+  **What it has in its favour, and it is not nothing:** `save()` disappears for updates, which
+  makes 4.3's cross-table invariant slightly harder to forget.
+  *Rejected — **SQLAlchemy Core alone** (query builder, no ORM).* The same two dependencies, so
+  nothing is saved at install; it keeps the pool and the metadata and has none of the ORM's
+  session semantics. It loses on the two points above — the write-back needs a hand-written
+  cache in place of the identity map, and the typed-column idiom is available but not the
+  default one.
+  *Rejected — **`psycopg` with hand-written SQL**.* One dependency instead of two, and 8.9 reads
+  exactly as it was written. Rejected for a side effect rather than a flaw: with no metadata
+  there is no `create_all`, so it would settle 4.6 by elimination instead of by decision.
+  *Rejected — **`psycopg2`**:* maintenance-only. **`asyncpg`** is excluded by 2.4.
+
+  *Completes 3.5's deferred half* — "session lifetime, pooling, and what `__enter__` actually
+  opens" — as above. Pool sizing stays at SQLAlchemy's defaults; whether it becomes tunable is
+  10.4.
+  *Leaves 4.6 open:* `Base.metadata` exists, so `create_all()`, Alembic and an init script all
+  remain available there. Alembic's autogenerate works from `MetaData`, which a query builder
+  would also have provided — declarative buys nothing on that axis and none is claimed.
+  *Feeds, does not decide:* 2.10 — `sqlalchemy` and `psycopg[binary]`, to be approved as one
+  list; 11.9 — the `[binary]` wheel has no musl build, which surfaces if that item chooses an
+  Alpine base; 3.4 — `application/queries.py` sits in a layer that cannot import
+  `infrastructure`, so the read path needs a port of its own.
+  *Source:* R20, `CLAUDE.md` §3, §6. *Constrained by:* 2.2, 2.4, 3.1, 3.5, 6.5, 8.9.
+  *Constrains:* 3.4. *Realised in:* U5.
 
 
 ## Topic 3 — Architecture and layering
