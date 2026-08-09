@@ -19,7 +19,7 @@ status markers, precisely so that this table cannot be contradicted.
 |---|---|---|
 | 1 — Scope and time | 1.1, 1.3, 1.4, 1.5 | 1.2 |
 | 2 — Stack and tooling | 2.1, 2.2, 2.3 | 2.4–2.10 |
-| 3 — Architecture and layering | — | 3.1–3.8 |
+| 3 — Architecture and layering | 3.1, 3.2, 3.3, 3.5, 3.6, 3.8 | 3.4, 3.7 |
 | 4 — Data model | 4.2, 4.3, 4.4, 4.8 | 4.1, 4.5, 4.6, 4.7 |
 | 5 — Business rules | 5.1, 5.2, 5.3, 5.5, 5.6, 5.8 | 5.4, 5.7 |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | — | 12.1–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **39** | **70** |
+| **Total** | **45** | **64** |
 
 Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
 
@@ -160,6 +160,310 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   *Runtime-neutral:* FastAPI supports both synchronous and asynchronous route handlers, so this
   decision does not pre-empt 2.4.
   *Source:* R12, `CLAUDE.md` §3 ("external input is validated at the edge").
+
+
+## Topic 3 — Architecture and layering
+
+- **3.1 Layer definition.** `[decided]`
+  *Decision:* **four directories, three layers, one dependency arrow — inward.**
+
+  ```
+  pizza/                    # the root package's shape is 3.3, not this item
+  │
+  ├── domain/               # layer 1 — imports: stdlib only
+  │   ├── order.py              Order, OrderStatus, AssignmentState, TransitionResult
+  │   ├── driver.py             Driver, DriverStatus
+  │   ├── rules.py              rules no single entity owns — none today; trigger in 3.2
+  │   └── errors.py             typed domain errors (5.2)
+  │
+  ├── application/          # layer 2 — imports: domain only
+  │   ├── ports.py             signatures fixed in 3.4
+  │   ├── queries.py           get_order, list_orders — read paths: no rules, no transaction
+  │   └── use_cases/           place_order · advance_order_status ·
+  │                            register_driver · dispatch_order — one file each
+  │
+  ├── infrastructure/       # layer 3, driven — imports: application, domain, libraries
+  │   ├── db/                  models, repositories, unit of work, outbox, migrations
+  │   ├── broker/              publisher, topology declaration
+  │   ├── clock.py             SystemClock
+  │   └── ids.py               exists only if 4.7 generates identifiers in the application
+  │
+  └── entrypoints/          # layer 3, driving — imports: application; wires only at main.py
+      ├── api/                 main · deps · schemas · errors · routers/{orders,drivers,health}
+      ├── worker/              main · consumer
+      └── cli/                 3.6
+  ```
+
+  *The rule, written so it can be checked in a diff:* **no module under `domain/` or
+  `application/` names `infrastructure` in an import, and outside the two `main.py` files no
+  module under `entrypoints/` does either.** `infrastructure/` imports `application/` in order
+  to implement its `Protocol`s — the arrow points inward even though the runtime call goes
+  outward, and that inversion is the entire content of "dependencies point inward".
+
+  *What framework-free means here, concretely:* `domain/` and `application/` import
+  `dataclasses`, `enum`, `datetime`, `uuid`, `typing` — and not `pydantic`, `sqlalchemy`,
+  `pika` or `fastapi`. Pydantic is third-party even though it is not infrastructure, and 2.3
+  already placed it at the edge. The test is one question: **can `domain/` and `application/`
+  run with nothing installed but Python?**
+
+  *Why `domain` and `application` are two layers and not one:* three decided items already
+  require a component that is neither a pure rule nor a route. 7.5 publishes "from the
+  application layer" after the commit; the constraint it placed on 3.5 gives the transaction to
+  the use case; 5.3 has the core report that an event must be emitted while an adapter
+  publishes it. If the transaction lives on the entity, the entity is no longer framework-free.
+  If it lives in the route, the worker cannot reuse it — which is exactly what 3.8 asks.
+
+  *Why ports sit in `application/ports.py`, not in `domain/`:* the caller of a port is the use
+  case, not the entity. `Order` has no reason to know that something stores it. 4.8's clock
+  port reaches the domain as an argument (`order.assign_to(driver_id, now)` — no domain
+  operation reaches for a time module), so `domain/` declares no ports at all and depends on
+  nothing.
+
+  *Composition root:* `entrypoints/api/main.py` and `entrypoints/worker/main.py` are the only
+  modules permitted to import `infrastructure/`. They construct the adapters and hand them to
+  the use cases; `routers/` and `consumer.py` receive them already built. Inside `api/`,
+  `deps.py` is the injection seam and `errors.py` holds the domain-error → HTTP-status table as
+  one registered handler, so 5.2's mapping is written once rather than per route.
+
+  *Rejected:* **one `core/` directory** holding entities, rules, ports and use cases — the same
+  files, one directory fewer, and at this size it would work; the honest reason to decline is
+  narrow. It loses the only thing that makes the inward rule enforceable: inside one directory,
+  `order.py` importing `ports.py` breaks no boundary and shows as nothing in a diff.
+  **A single `adapters/`** merging driven and driving — correct terminology, and it hides the
+  one distinction R20 asks to see. **Feature-first** (`orders/`, `drivers/`, each with its own
+  layers) — right at a larger scale; here there are two entities, and R20 names layers, so a
+  reviewer would be reading for a structure that is not there. **`interfaces/` as the name of
+  the driving layer** — in Python it reads as `Protocol`, and the `Protocol`s live in
+  `application/ports.py`; the name would point at the opposite layer.
+
+  *Deliberately left to later items:* how the rules divide between methods on the entities and
+  `domain/rules.py` is 3.2 — both live entirely inside `domain/`, so neither changes a layer,
+  an arrow, or an import rule. Whether `ids.py` exists follows 4.7. What the root
+  package is, and whether the API and the worker share it, is 3.3.
+  *Source:* R20, `CLAUDE.md` §3. *Constrained by:* 5.3, 7.5. *Constrains:* 3.2, 3.4, 3.6, 3.8.
+
+- **3.2 What lives in the framework-free core.** `[decided]`
+  *Decision:* the rules this item names land as follows.
+
+  | Rule | Where | Form |
+  |---|---|---|
+  | Status transition (5.1, 5.2) | `domain/order.py` | `order.advance_to(to) -> TransitionResult` |
+  | Publish trigger (5.3) | the same operation | `TransitionResult.must_publish` |
+  | Driver release (5.6) | the same operation, plus `domain/driver.py` | `TransitionResult.releases_driver` and `driver.release()` |
+  | Assignment eligibility (5.5) | `domain/order.py` | `order.can_be_assigned()` |
+  | Driver **selection order** | `infrastructure/db/` — see below | the `ORDER BY` inside the claim query (8.9) |
+
+  *Where each rule lives:* a rule that one entity can decide from its own fields is a **method
+  on that entity**. A rule that no single entity owns — one that must read two entities to reach
+  its verdict, and cannot be expressed as a flag on one entity's own result — is a **free
+  function in `domain/rules.py`**. Both are inside `domain/`; the split is about ownership, not
+  about layering.
+  *Every rule decided so far falls on the method side*, including 5.6: its cross-entity
+  appearance is coordination performed by the use case, not a rule spanning two entities.
+  `domain/rules.py` therefore holds nothing today and **is not created empty** — `CLAUDE.md` §6
+  rejects dead code. The tree in 3.1 marks the slot so that the first such rule has a named
+  destination instead of being improvised into whichever entity it half-fits.
+
+  *Why the publish trigger is a returned field and not a second method:* 5.3 already fixed the
+  mechanism — the core "reports back that an event must be emitted" — and left only the module
+  to this item. A returned value is what reporting back means. A separate `should_publish(order)`
+  would let a caller advance the status and never ask the question, which is the failure 5.3
+  exists to prevent.
+
+  **The one rule not enforced in the core, stated plainly.** 8.9's claim is
+  `SELECT … FOR UPDATE SKIP LOCKED LIMIT 1`, and `LIMIT 1` without an `ORDER BY` is not
+  deterministic. That `ORDER BY` is what selects the driver, and it lives in `infrastructure/db/`.
+  *Why that is acceptable:* it is not a business rule. R7 asks for "**an** `AVAILABLE` driver"
+  and names no preference; the ordering exists only because 4.3 needed a deterministic
+  tie-breaker, so that a test can assert on an outcome rather than on a set. A business rule is
+  something that can be violated — this one has nothing to violate.
+  *Why it cannot simply move inward:* selecting in Python and then locking is a read-then-lock
+  race, and 8.9 already rejected the optimistic retry loop that would repair it. The selection
+  and the lock must be one statement, so the predicate lives where the statement lives.
+  *How it stays visible, without a comment doing the work:* the port's **name** carries the
+  convention to every call site rather than hiding it (`claim_next_available_driver`; 3.4 fixes
+  the exact signature); its `Protocol` docstring in `application/ports.py` — inside the core —
+  states the ordering, why it is a convention, and where a future rule would enter; and the
+  behaviour is verified by a test that registers two drivers and asserts which is claimed, so
+  the `ORDER BY` cannot be dropped silently.
+  *Conditional, and the condition is real:* this holds only while 5.4 chooses an ordering with
+  no business content. If 5.4 decides a preference that expresses business intent, the ordering
+  becomes a business rule, `CLAUDE.md` §3 applies, and this item reopens.
+
+  *What deliberately does not live in the core* — each of these looks like a rule and is not:
+
+  | Looks like a rule | Lives in | Fixed by |
+  |---|---|---|
+  | ack / nack selection | `entrypoints/worker/consumer.py` | 8.1 — these are AMQP terms |
+  | domain error → HTTP status | `entrypoints/api/errors.py` | 5.2 — the core raises a type, not a code |
+  | publish-after-commit ordering | `application/use_cases/` | 7.5 — orchestration, not a rule |
+  | the nested-driver response shape | `application/queries.py` and the schemas | 6.5 — "the core never sees this shape" |
+  | row locking in the claim | `infrastructure/db/` | 8.9 |
+
+  *Rejected:* **a `DriverCriteria` parameter on the claim port today** — it would not move the
+  selection into the core, because 8.9 keeps the predicate inside the statement either way; what
+  it buys is runtime-selectable policies, which nothing asks for. Adding it when a filtering rule
+  arrives touches four lines across layers that already exist, so there is no discount for buying
+  early — and a criteria type with no fields is precisely the speculative abstraction
+  `CLAUDE.md` §6 names. **Reading candidate drivers into the core and choosing there** — the
+  orthodox layering answer, and it contradicts 8.9. **A `domain/rules.py` holding every rule,
+  with the entities as data only** — the Anemic Domain Model: rules separated from the data they
+  constrain, which is the arrangement both DDD and `CLAUDE.md` §3 argue against.
+  *Source:* `CLAUDE.md` §3, §6, R7. *Constrained by:* 5.3, 5.5, 5.6, 8.9. *Constrains:* 3.4, 3.8.
+  *Revisit if:* 5.4 gives the selection order business content.
+
+- **3.3 Code sharing between API and worker.** `[decided]`
+  *Decision:* **one importable package, `src/pizza/`, with the service boundary at
+  `entrypoints/`.** The API and the worker are two `main.py` files, two containers and two
+  processes over one database. They share `domain/`, `application/` and `infrastructure/`, and
+  duplicate nothing.
+
+  ```
+  repo root/
+  ├── src/pizza/            # the one package — 3.1's tree lives here
+  │   ├── domain/ · application/ · infrastructure/
+  │   └── entrypoints/ api · worker · cli        # ← the service boundary
+  ├── tests/ integration/ · unit/                # CLAUDE.md §5; contents are topic 12
+  ├── docs/ · .claude/                           # committed, 14.5
+  └── docker-compose.yml · .env.example · README.md
+  ```
+
+  *Why not two independent services sharing a wire contract* — the orthodox microservice answer,
+  and the assignment excludes it as a matter of fact rather than taste. R7 has the worker query
+  **the database** for a driver and R8 has it write the assignment, so the two services share a
+  schema, not a message format. Routing that through the API instead would also break 8.9:
+  claiming a driver is a row lock inside a transaction, and an HTTP call cannot join another
+  process's transaction.
+
+  *Worth stating rather than hiding:* a database shared by two services is normally an
+  anti-pattern, precisely because it removes the independence that makes them separate. The
+  brief uses "microservice" in the loose sense — several services under Compose — and what is
+  delivered is exactly the architecture it draws. A24 records the reading.
+
+  *Why not duplicated modules* — its real advantage is independent build and release for
+  separate teams, and there are no separate teams here. It puts 5.5's guard in two files, which
+  `CLAUDE.md` §3 forbids in one sentence: "if a rule is enforced in two components, the rule is
+  in the wrong place."
+
+  *Why `src/pizza/` and not `pizza/` at the repository root:* with a flat layout `import pizza`
+  resolves from the working directory, so the suite can pass against the source tree while the
+  installed package is broken. Under src-layout the directory holding the package is not itself
+  importable, so every run goes through the install. The alternative defence — that 11.3 runs
+  the suite inside the built environment — only holds if the image ships the installed package
+  rather than a copy of the repository, which is 3.7's call and not yet made. The layout gives
+  the guarantee without depending on it.
+  *Rejected — `src/` as the package itself* (`from src.domain import …`): the import name then
+  carries no information, two such projects cannot coexist in one environment, and it breaks the
+  correspondence between distribution name and import name that a project file establishes.
+
+  *The FW2 tension this item was asked to settle:* the shared package is required by
+  `CLAUDE.md` §3 and R20 whether or not FW2 ever arrives, so its effect on FW2 is a consequence
+  and not a justification. **Nothing generic is built** — no background-process base class, no
+  runner, no plugin mechanism. `entrypoints/worker/` is one concrete worker. If the relay ever
+  arrives it is `entrypoints/relay/main.py` plus a Compose entry: cheap because the layers
+  already exist, not because a slot was left for it.
+
+  *Feeds, does not decide:* 2.9 owns how dependencies are declared and whether there is one set
+  or one per service; 3.7 owns the number of images. This item fixes only that there is one
+  package for them to package.
+  *Source:* R7, R8, R14, R20, `CLAUDE.md` §3. *Constrained by:* 7.5, 8.9. *Constrains:* 2.9,
+  3.7, 3.8. *Defines:* A24.
+
+- **3.5 Transaction ownership.** `[decided]`
+  *Decision:* the transaction is opened and committed by the **use case**, through a
+  `UnitOfWork` port that hands out the repositories bound to it. `domain/` never learns that
+  transactions exist; `application/` knows the boundary, not the mechanism.
+
+  ```python
+  # application/ports.py — the whole of what the core knows
+  class UnitOfWork(Protocol):
+      orders: OrderRepository
+      drivers: DriverRepository
+      outbox: OutboxStore
+      def __enter__(self) -> "UnitOfWork": ...
+      def __exit__(self, *exc: object) -> None: ...   # leaving without commit rolls back
+      def commit(self) -> None: ...
+
+  # application/use_cases/advance_order_status.py
+  with self._uow as uow:
+      ...
+      uow.commit()                       # the commit is a line
+  if result.must_publish:
+      self._publish_and_mark(event)      # 7.5's "one identified line", relative to it
+  ```
+
+  *Why the unit of work holds the repositories rather than receiving them:* if `orders` and
+  `drivers` were injected separately, nothing structural would keep them on one transaction —
+  atomicity would depend on the composition root having built them from the same session. With
+  `uow.orders` and `uow.drivers` that is the type's job. **Without overstating it:** 4.3 records
+  its invariant as "enforced by discipline", and this removes only half of that. It guarantees
+  that if both writes happen they are atomic; it does not guarantee both happen. The ghost
+  driver still depends on the use case not forgetting.
+
+  *Which layer knows what:* `domain/` does not contain the word `transaction` — entities are
+  values, and `order.advance_to()` cannot tell whether anything is being persisted at all.
+  `application/` knows a transactional **boundary** exists, because 7.5 puts the commit there,
+  but it knows it as a `Protocol`. No module under `domain/` or `application/` imports a
+  database library; the import appears in exactly one class, the one implementing the port.
+
+  *Read paths use the same unit of work and never commit.* A second, read-only port would exist
+  only to avoid a word. It creates no conflict with 6.5's recorded cost either — under
+  PostgreSQL's default isolation each statement takes its own snapshot regardless.
+
+  *Rejected:* **a transaction per repository** — two transactions mean a crash between them
+  leaves a driver `BUSY` with no order, which is precisely the ghost driver 4.3 already carries
+  as an accepted cost; there is no reason to invite a second source of it. **A `@transactional`
+  decorator on the use case** — the commit becomes a side effect of returning, so there is no
+  line for the publish to be "one identified line relative to", and 7.5 could then be satisfied
+  only by moving the publish out of the use case entirely. **Passing a session to every
+  repository call** — explicit, widely used, and the default in other languages; it fails here
+  on one type. Typed as the real session it puts a database library in `application/ports.py`;
+  typed as an opaque token defined in `application/` it is a unit of work with a parameter added
+  to every method.
+
+  *Left to 2.5:* session lifetime, pooling, and what `__enter__` actually opens. This item fixes
+  the shape, not the driver.
+  *Source:* R8, `CLAUDE.md` §3. *Constrained by:* 4.3, 7.5. *Constrains:* 3.4, 8.9.
+
+- **3.6 Where the CLI sits.** `[decided]`
+  *Decision:* a **driving adapter in `entrypoints/cli/`, speaking only HTTP to the API.** It
+  imports nothing from `domain/` or `application/`, shares nothing with the two services beyond
+  the wire contract, holds no business rule, and runs as its own process.
+
+  *What it knows, exhaustively:* the endpoint paths, the request and response shapes, and the
+  **names** of the five status values. All of it is published contract — R2 lists the statuses in
+  the endpoint description, and 2.3's generated OpenAPI document carries the rest. A client that
+  does not know these cannot call the API at all.
+  *What it deliberately does not know:* which status may follow which. 9.2 offers all five values
+  and lets the API answer, so the transition rule stays in `domain/` alone — and 5.2's `409`
+  becomes something a reviewer triggers from the interface rather than reads about in a document.
+
+  *The test this item sets, since 9.4 and 9.5 both defer to it:* **if the CLI held a stale copy
+  of some fact, would the system reach a wrong state, or would one screen be less convenient?**
+  A wrong state means the fact is a rule and belongs only in the core. Less convenient means it
+  is presentation. As decided, the client holds nothing in the first category.
+
+  *Rejected:* **a CLI that imports the core** — `domain/` would then serve two consumers, so an
+  API change could no longer be verified through the API alone, and `CLAUDE.md` §3's "additional
+  interfaces are thin adapters" would be broken structurally rather than arguably.
+  **A CLI holding the transition sequence in order to offer one "advance" action** — the
+  arrangement 9.2 originally carried; it needed an argument that the client only *predicts* while
+  the core *decides*, and the simpler interface removes the need for the argument along with the
+  knowledge.
+  *Sets the rule, does not apply it:* 9.4 splits local validation from API rejection; 9.5 decides
+  client-side state.
+  *Source:* R11, `CLAUDE.md` §3. *Constrained by:* 9.2. *Constrains:* 9.4, 9.5.
+
+- **3.8 Whether the worker uses the same core as the API.** `[decided]`
+  *Decision:* **the same core, the same repositories, the same unit of work.** The worker's
+  entry point is `entrypoints/worker/`, and everything below it — `dispatch_order`, the ports,
+  the entities — is the code the API already runs. There is no second data path: the worker owns
+  no SQL of its own and no direct database access outside the repositories.
+  *Why this needs no argument:* 3.3 put both services in one package, 3.1 put `dispatch_order`
+  in `application/use_cases/`, and 3.5 gave both entry points the same `UnitOfWork`. `CLAUDE.md`
+  §3's "every entry point uses the same core" is satisfied by the structure rather than by a
+  choice made here.
+  *Source:* `CLAUDE.md` §3, R20. *Constrained by:* 3.1, 3.3, 3.5.
 
 
 ## Topic 4 — Data model
@@ -643,17 +947,22 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   1. place an order
   2. register a driver
   3. list orders and select one (by customer name, via `GET /orders` — A14)
-  4. advance the selected order's status
+  4. update the selected order's status — the user picks from the five values
   5. quit
   *Why status update is included:* the entire behaviour of the system is dispatch triggered by
   `BAKING`. Without it the CLI demonstrates half a product — create an order, register a
   driver, then reach for `curl` to make anything happen. The DoD asks for a client that
   "allows manual interaction with the running API services", not for the three calls named in
   R11, and the demo path (1.2) does not run without it.
-  *Consequence of A3 worth naming:* because transitions are strictly linear, every order has
-  exactly **one** legal next status. The CLI therefore offers a single `Advance to BAKING`
-  action rather than a menu of five statuses of which four would return `409`. A tighter
-  business rule produced a simpler interface — worth a line in the README.
+  *Why the menu offers all five statuses rather than only the legal next one:* because the chain
+  is strictly linear (A3), exactly one of the five is legal at any moment, and a single
+  `Advance to BAKING` action was the obvious simplification. It was rejected on two counts. It
+  would place the transition sequence 5.1 owns inside the client, which 3.6 forbids; and it
+  would make the `409` path unreachable from the CLI, so a reviewer could never see the system
+  refuse an illegal transition through the interface they were handed. Offering all five keeps
+  the client free of business knowledge and makes 5.2 demonstrable rather than merely described.
+  *Accepted cost:* at any moment four of the five choices return `409`. The error is displayed,
+  not hidden — and showing it is part of the point.
   *Source:* R11, R19. *Answers:* Q19.
 
 - **9.6 Windows and TTY behaviour.** `[decided]`
@@ -851,6 +1160,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A21** | Windows-to-Linux friction is handled by configuration and documentation, not code | 9.6 |
 | **A22** † | `ORDER_READY` is published after the commit; if the broker is unreachable the `PATCH` still returns `200` and the event is lost | 7.5, 7.6 |
 | **A23** † | Every event is recorded in an `outbox` table, but nothing replays unpublished rows | 7.5 |
+| **A24** † | "Microservice" means separate processes and containers, not separate codebases — the API and the worker are two entrypoints into one package over one database | 3.3 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".
 It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the structure is now
