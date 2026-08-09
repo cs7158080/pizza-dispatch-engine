@@ -17,7 +17,7 @@ status markers, precisely so that this table cannot be contradicted.
 
 | Topic | Decided | Open |
 |---|---|---|
-| 1 — Scope and time | 1.1, 1.3, 1.4, 1.5 | 1.2 |
+| 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1, 2.2, 2.3, 2.4, 2.5 | 2.6–2.10 |
 | 3 — Architecture and layering | 3.1, 3.2, 3.3, 3.5, 3.6, 3.8 | 3.4, 3.7 |
 | 4 — Data model | 4.2, 4.3, 4.4, 4.7, 4.8 | 4.1, 4.5, 4.6 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | — | 12.1–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **49** | **60** |
+| **Total** | **50** | **59** |
 
 Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
 
@@ -79,6 +79,69 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   it would have permitted a third endpoint of no value and forbidden a fourth that a DoD row
   needed. It counts the wrong thing.
   *Source:* assignment time estimate; `CLAUDE.md` §3, §7. *Governs:* Part 5. *Requires:* R22, R23.
+
+- **1.2 The demo path.** `[decided]`
+  *Decision:* **one sequence, thirteen steps, two terminals, one tool.** It is the path the
+  README documents, and the only one it documents.
+
+  | # | Terminal | Action | What it shows |
+  |---|---|---|---|
+  | 1 | 1 | `docker compose up` | stack starts, suite runs, PASS/FAIL summary (11.3) |
+  | 2 | 2 | `docker compose run --rm cli` | the menu (9.3) |
+  | 3 | 2 | place an order | `RECEIVED`, `assignment_state: PENDING` |
+  | 4 | 2 | list orders, select by customer name | R11 without retyping a UUID (A14) |
+  | 5 | 2 | advance to `PREPARING` | `200` |
+  | 6 | 2 | advance to `BAKING` | publish (5.3); **T1:** worker warns "no driver", rejects to the wait queue (8.1, 8.2) |
+  | 7 | 2 | register a driver | `AVAILABLE` (6.4) |
+  | 8 | 1 | wait one retry cycle | **T1:** the dispatch line (8.6) |
+  | 9 | 2 | re-read the order | nested driver, `ASSIGNED`, `assigned_at` (6.5) |
+  | 10 | 2 | advance to `READY` | second publish; **T1:** worker acks, changes nothing (5.5) |
+  | 11 | 2 | attempt `BAKING` again | `409` (5.2) |
+  | 12 | 2 | advance to `DELIVERED`, re-read | `COMPLETED`, driver back to `AVAILABLE` (5.6) |
+  | 13 | 2 | quit, then `docker compose down` | clean reset (11.7) |
+
+  *Why the missing-driver path is demonstrated by hand, and the one thing it depends on:* R9 is
+  the most interesting behaviour in the assignment, and step 6 buys it for free — simply by not
+  registering a driver first. It depends on there being no `AVAILABLE` driver when step 6 runs,
+  and 11.6 runs the suite against the same live stack over a global driver pool.
+  **Recorded as a dependency on 12.1, not as a requirement on it.** The likely risk-ranked set
+  leaves the pool empty already: successful dispatch, no-driver retry and duplicate-event
+  scenarios all end with the driver `BUSY`, and an illegal-transition scenario registers no
+  driver at all. A scenario dedicated to release at `DELIVERED` would break it — and adding a
+  trailing step to that scenario purely so the demo works is a test doing work for a non-test
+  reason, which `CLAUDE.md` §5 forbids. If 12.1 chooses such a scenario, this item reopens.
+  *What removes the silence, independently of the above:* the README states **both** outcomes of
+  step 6 — if a driver is already available the assignment is immediate, and that is correct
+  behaviour rather than a failure. A step that degrades legibly needs no guarantee behind it.
+
+  *Why one order and not two:* step 12's re-read already returns the driver nested with
+  `status: AVAILABLE` (6.5), which is the proof that 5.6 released them. A second order proves
+  the same fact a second time for three more menu actions.
+
+  *What is deliberately not in the path:*
+  **The broker-down path (7.6)** — the strongest interview material in the record, and it needs
+  `docker compose stop` plus a look at the `outbox` row, so it needs psql or a published port.
+  It goes to the README trade-offs (13.4), where it costs nothing and reopens no item.
+  **The OpenAPI document at `/docs`** — the demo stays one tool. 9.3 freed 11.8 of any CLI
+  dependency and this item does not put one back.
+  **The `409`, by contrast, is in** — after `READY` it is one menu action, and it turns 5.2 from
+  something a reviewer reads about into something they trigger (9.2).
+
+  *Step 0 and the last step:* there is **no step 0**. `git clone` then `docker compose up`, which
+  is what 10.5 already asserts a reviewer must be able to do; `.env.example` is the override
+  surface, not a precondition. Teardown is `docker compose down` **without** `-v`, per 11.7.
+  *Noted:* the README sentence quoted in 11.6 says `down -v`; it predates 11.7's decision to use
+  no named volumes, and U13 writes `down`.
+
+  *Constrains, and these are the reason this item is decided before them:*
+  **11.1** — `attach: false` on postgres and rabbitmq, so terminal 1 carries api, worker and
+  tests only. **10.4 with 8.3** — the retry TTL must be short enough that step 8 feels immediate
+  (single-digit seconds), and `TTL × cap` must exceed the time a person needs to complete step 7;
+  a floor of 60 s. Without it the order reaches `FAILED` in front of the reviewer and reads as a
+  defect. **10.3 / 10.5** — compose supplies working defaults; no step 0. **13.2 / 13.3** — the
+  diagram's covered sequence is steps 3–12, which is also every path R17 names.
+  *Source:* R11, R17, R19. *Constrained by:* 5.1, 5.2, 5.3, 5.5, 5.6, 6.5, 6.6, 9.2, 9.3,
+  11.3–11.7. *Constrains:* 10.3, 10.4, 11.1, 13.1, 13.2, 13.3. *Depends on:* 12.1.
 
 - **1.3 Which decisions carry a full record.** `[decided]`
   *Decision:* two depths, and the test between them is one question:
