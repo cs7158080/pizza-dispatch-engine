@@ -30,10 +30,10 @@ one branch and one commit (`CLAUDE.md` §4).
 |---|---|---|---|---|
 | **U1** Foundation | Repository skeleton, package layout, dependency management, formatter/linter/type-checker config, `.gitignore` verification, `docs/ai-log.md` | 1, 2.8–2.10, 3.1, 3.3, 13.5, 14 | — | all |
 | **U2** Configuration | Typed settings object, `.env.example`, config validation at startup | 10 | U1 | U5, U6, U7, U8, U9 |
-| **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7, 4.8, 5 | U1 | U4, U5, U6, U7, U8 |
+| **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces, the `ORDER_READY` event type. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7, 4.8, 5 | U1 | U4, U5, U6, U7, U8 |
 | **U4** Core unit tests | Unit tests for the rules identified as infrastructure-free | 5.7, 12.6, 12.7 | U3 | — |
 | **U5** Persistence | Schema and migrations, repository implementations, the `outbox` table and its insert/mark-published operations (7.5), integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 7.5, 8.9 | U2, U3 | U7, U8 |
-| **U6** Broker adapter | Topology declaration, event payload type, publisher implementation, connection lifecycle | 2.1, 2.7, 7 | U2, U3 | U7, U8 |
+| **U6** Broker adapter | Topology declaration, event serialization (7.3), publisher implementation, connection lifecycle | 2.1, 2.7, 7 | U2, U3 | U7, U8 |
 | **U7** API service | Routes, edge validation, error format, status-update endpoint including the publish trigger, wiring of core + repositories + publisher | 2.3, 2.4, 6, 7.5, 7.6 | U3, U5, U6 | U9, U12 |
 | **U8** Dispatch worker | Consumer loop, ack/nack policy, retry and dead-letter handling, poison-message handling, dispatch logging, startup/shutdown | 8 | U3, U5, U6 | U9 |
 | **U9** Compose environment | Dockerfiles, compose services, healthchecks and readiness ordering, volumes, ports, restart policies | 3.7, 11.1, 11.2, 11.7–11.11 | U7, U8 | U10, U11 |
@@ -166,3 +166,46 @@ recorded.
   *One thing it would simplify:* the publisher thread-safety obligation 2.4 hands to 7.7
   disappears. A single event loop serialises channel access by construction, so no lock is
   needed.
+
+- **FW13 — Isolated end-to-end test environment.** A compose overlay
+  (`docker-compose.test.yml`) that brings the whole system up a second time — its own
+  PostgreSQL, RabbitMQ, API and worker — alongside the test runner, so the suite never shares a
+  database or a broker with the environment a reviewer drives by hand. **The Dockerfiles are not
+  duplicated:** the API and the worker run the same images as the demo environment, and the
+  difference is confined to compose configuration and storage.
+
+  ```
+  docker compose up                                                    # demo, stays up
+  docker compose -f docker-compose.yml -f docker-compose.test.yml up   # isolated E2E
+  ```
+
+  *Why it is not in scope:* R15 requires `docker compose up` **itself** to execute the suite. An
+  overlay reached by a second command does not satisfy it, and promoting the overlay to the
+  primary launch would leave the default `up` with no tests at all. What it buys over 11.6 is
+  also narrower than it looks: 11.7 already guarantees a clean start, so the only failure it
+  removes is re-running `up` after driving the system by hand — which one documented
+  `docker compose down` already covers. Under 1.1's ceiling test, no named DoD row fails without
+  it.
+  *The lighter version was considered and fails the same test:* keeping `up` exactly as 11.3
+  defines it and documenting the overlay beside it, the way 11.4 documents its CI gate. R15
+  would survive, but the overlay would still be structure no DoD row requires.
+
+  *What it would unlock — the two real reasons to want it, neither obtainable while the
+  environments are shared:*
+  1. **Test-only configuration.** A short retry TTL and a low attempt cap would make an
+     exhaustion scenario (F7) cost seconds instead of the ~60 s that 1.2's human-paced floor
+     imposes. There is one `TTL × cap` product, the wait queue's TTL is a queue-level property
+     (8.2) rather than a per-consumer one, and the demo and the suite pull that single number in
+     opposite directions. *The cost is not small:* the suite would stop exercising the
+     configuration that ships, so a wrong retry budget in the delivered environment would pass
+     green.
+  2. **Named volumes for the demo environment.** 11.7's sole justification is the shared driver
+     pool, so isolation removes it and A19 reopens. Nothing asks for persistence, and it turns
+     `docker compose down` into `down -v`.
+
+  *What it would touch, if ever taken:* 11.6 rewritten; 11.3, 11.4, 11.5 and 11.7 materially
+  affected; A8 and A19; steps 1 and 2 of 1.2's demo path; 12.3's reopen condition and 12.5's
+  data strategy.
+  *One thing it does not break:* an overlay merged with `-f` is not a second independent compose
+  file, so R14's "one `docker-compose.yml`" survives. 9.3 rejected a second compose file for the
+  CLI on that same reading, and the distinction would have to be written there.

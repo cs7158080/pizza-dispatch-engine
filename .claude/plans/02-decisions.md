@@ -19,21 +19,24 @@ status markers, precisely so that this table cannot be contradicted.
 |---|---|---|
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1, 2.2, 2.3, 2.4, 2.5 | 2.6–2.10 |
-| 3 — Architecture and layering | 3.1, 3.2, 3.3, 3.5, 3.6, 3.8 | 3.4, 3.7 |
+| 3 — Architecture and layering | 3.1–3.8 | — |
 | 4 — Data model | 4.2, 4.3, 4.4, 4.7, 4.8 | 4.1, 4.5, 4.6 |
-| 5 — Business rules | 5.1, 5.2, 5.3, 5.5, 5.6, 5.8 | 5.4, 5.7 |
+| 5 — Business rules | 5.1–5.6, 5.8 | 5.7 |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
 | 7 — Broker contract | 7.5, 7.6 | 7.1–7.4, 7.7 |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | — | 10.1–10.5 |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
-| 12 — Testing | — | 12.1–12.10 *(12.6 partial)* |
+| 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **50** | **59** |
+| **Total** | **56** | **53** |
 
-Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
+**Phase 3 for a unit does not begin while an item that unit depends on is open.** The gate is
+per unit, exactly as Part 4 of `03-roadmap.md` states it, and not global — an earlier wording
+here made it global and contradicted that rule. What `CLAUDE.md` §2 buys is that implementation
+contains no decisions, and that holds per unit once the unit's own inputs are closed.
 
 ---
 
@@ -399,7 +402,7 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   *Feeds, does not decide:* 2.10 — `sqlalchemy` and `psycopg[binary]`, to be approved as one
   list; 11.9 — the `[binary]` wheel has no musl build, which surfaces if that item chooses an
   Alpine base; 3.4 — `application/queries.py` sits in a layer that cannot import
-  `infrastructure`, so the read path needs a port of its own.
+  `infrastructure`, so the read path reaches the database only through a port.
   *Source:* R20, `CLAUDE.md` §3, §6. *Constrained by:* 2.2, 2.4, 3.1, 3.5, 6.5, 8.9.
   *Constrains:* 3.4. *Realised in:* U5.
 
@@ -591,8 +594,9 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   installed package is broken. Under src-layout the directory holding the package is not itself
   importable, so every run goes through the install. The alternative defence — that 11.3 runs
   the suite inside the built environment — only holds if the image ships the installed package
-  rather than a copy of the repository, which is 3.7's call and not yet made. The layout gives
-  the guarantee without depending on it.
+  rather than a copy of the repository. 3.7 has since decided exactly that, so both defences now
+  hold — but the layout gave the guarantee without depending on it, which is why it was chosen
+  before 3.7 was made.
   *Rejected — `src/` as the package itself* (`from src.domain import …`): the import name then
   carries no information, two such projects cannot coexist in one environment, and it breaks the
   correspondence between distribution name and import name that a project file establishes.
@@ -609,6 +613,77 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   package for them to package.
   *Source:* R7, R8, R14, R20, `CLAUDE.md` §3. *Constrained by:* 7.5, 8.9. *Constrains:* 2.9,
   3.7, 3.8. *Defines:* A24.
+
+- **3.4 The interfaces the core exposes to adapters.** `[decided]`
+  *Decision:* **five `Protocol` ports in `application/ports.py`**, plus 3.5's `UnitOfWork`, not
+  restated here. Repositories reach a use case as `uow.orders`, `uow.drivers`, `uow.outbox`;
+  `Clock` and `EventPublisher` are injected directly. `domain/` declares no ports (3.1). No
+  `IdGenerator` — 4.7 removed it. No read port — see below.
+
+  ```python
+  # application/ports.py
+  class Clock(Protocol):
+      def now(self) -> datetime: ...                 # timezone-aware UTC (4.8)
+
+  class OrderRepository(Protocol):
+      def add(self, order: Order) -> None: ...       # returns nothing — 4.7
+      def get(self, order_id: UUID) -> Order | None: ...
+      def save(self, order: Order) -> None: ...
+      def list_all(self) -> list[Order]: ...         # newest first; docstring carries it
+
+  class DriverRepository(Protocol):
+      def add(self, driver: Driver) -> None: ...
+      def get(self, driver_id: UUID) -> Driver | None: ...
+      def save(self, driver: Driver) -> None: ...
+      def claim_next_available_driver(self) -> Driver | None: ...   # 8.9 locks, 5.4 orders
+
+  class OutboxStore(Protocol):
+      def add(self, event: OrderReadyEvent) -> None: ...
+      def mark_published(self, event_id: UUID, now: datetime) -> None: ...
+
+  class PublishFailed(Exception): ...
+
+  class EventPublisher(Protocol):
+      def publish(self, event: OrderReadyEvent) -> None: ...        # raises PublishFailed
+
+  # application/events.py   — OrderReadyEvent, a frozen dataclass; its fields are 7.2's
+  # application/queries.py  — OrderDetail(order: Order, driver: Driver | None)
+  ```
+
+  *Why the event type is in `application/`, not `domain/`.* Ownership, not layering — a stdlib
+  dataclass passes 3.1's test either way. 3.2 has the transition return a flag,
+  `TransitionResult.must_publish`, not an object, so `domain/` never builds an event; 4.7
+  generates `event_id` in the application layer; both consumers are ports in `ports.py`. The DDD
+  alternative — the entity appending events, the use case draining them — would force `domain/`,
+  but reaching it means reopening 3.2 and giving entities the mutable buffer 3.5 and 2.4 both
+  rule out. *This corrects U6*, which held the type and cannot: `application/` may not import
+  `infrastructure`. U6 keeps serialization (7.3).
+
+  *Why no read port, though 2.5 said one was needed.* Its actual requirement — `queries.py`
+  never touching `infrastructure` — is met through the `UnitOfWork`. A **new** port is what is
+  not needed: 6.5's two keyed reads are `orders.get` and `drivers.get`, which the write paths
+  already require, and `GET /orders` adds one method to a repository that exists. `queries.py`
+  returns `OrderDetail` and the API schemas nest and select — 6.5 and 3.2 together — which also
+  keeps 6.6's field list off the port.
+
+  *Why a failed publish raises.* A `bool` is silent by default: ignore it and an unpublished
+  event is marked published. `PublishFailed` sits beside its port, not in `domain/errors.py` —
+  an unreachable broker is not a violated rule. The use case catches it, not the router, since
+  7.6 returns `200` either way.
+
+  *One line each:* 7.5 publishes after the commit, so `mark_published` runs in a second
+  transaction and **the `UnitOfWork` must be re-enterable**, each `__enter__` opening a fresh
+  `Session` (2.5); a failure there is logged, not raised, since nothing acts on unpublished rows.
+  Identifiers are plain `UUID`, no `NewType` — a static check on our own code in a two-entity
+  codebase, and 4.7's sample is corrected to match. `Protocol` not `ABC`, following 3.5. A
+  missing row returns `None`, which the use case turns into a domain error that 5.2 maps.
+  `claim_next_available_driver` returns a locked driver without marking it; the use case marks
+  and saves in the same transaction (8.9). **No lifecycle on `EventPublisher`** — the composition
+  root holds the concrete adapter (3.1) — which *constrains* 7.7 rather than waiting on it.
+
+  *Source:* `CLAUDE.md` §3 ("explicit typed boundaries"), §2 Phase 3. *Constrained by:* 2.4, 2.5,
+  3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
+  2.5's "a port of its own", 4.7's sample line. *Realised in:* U3.
 
 - **3.5 Transaction ownership.** `[decided]`
   *Decision:* the transaction is opened and committed by the **use case**, through a
@@ -694,6 +769,83 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   *Sets the rule, does not apply it:* 9.4 splits local validation from API rejection; 9.5 decides
   client-side state.
   *Source:* R11, `CLAUDE.md` §3. *Constrained by:* 9.2. *Constrains:* 9.4, 9.5.
+
+- **3.7 Number of Docker images.** `[decided]`
+  *Decision:* **one Dockerfile, one build context, two stages.** A `runtime` stage carries the
+  installed package and the runtime dependency set; a `test` stage derives from it and adds the
+  dev dependencies and `tests/`. Four compose services: api, worker and cli run the `runtime`
+  image and differ only in `command`; the one-shot `tests` service (11.3) builds `target: test`.
+
+  ```
+  Dockerfile — one context, two stages
+    FROM python:3.x-slim AS runtime
+      <dependency layer>           # before the source is copied, so a source edit does not
+                                   # reinstall — the mechanism is 2.9's, not this item's
+      COPY src/ ./src/             # 3.3's one package
+      RUN  pip install .           # installed, never run from the working directory
+      USER app                     # not root
+    FROM runtime AS test           # derived, not a sibling
+      <dev dependency layer>
+      COPY tests/ ./tests/
+
+  compose
+    api · worker · cli   → runtime, one command each
+    tests                → build target: test
+  ```
+
+  *Why the package is installed and not copied-and-run:* 3.3 chose src-layout, under which the
+  directory holding the package is not importable. An image doing `COPY . /app` and running from
+  the working directory cannot `import pizza` at all, and the one escape — `PYTHONPATH=/app/src`
+  — reconstructs exactly the failure src-layout was chosen to prevent: a suite passing against
+  the source tree while the installed distribution is broken. **This is not a judgement left
+  open; 3.3 settled it and this item records it.** What 3.3 left genuinely free is the *number*
+  of images, on which it deliberately took no position.
+
+  *Rejected — an image per service* (api / worker / cli / tests). Its real use is services that
+  are separate repositories or have genuinely divergent runtimes; neither holds here. 3.3 made
+  this one package with two processes over one schema, so four near-identical Dockerfiles would
+  imitate a microservice split the architecture does not have — and the per-service delta is one
+  or two pure-Python wheels: the API publishes to the broker (7.5, 7.6) so it needs the AMQP
+  client, and the worker writes through the same core (3.8) so it needs SQLAlchemy. The union is
+  almost the whole set. Four build contexts and four caches would buy megabytes.
+
+  *Rejected — a single stage holding everything.* Shipping `pytest` inside the image the API
+  runs is the one thing here a production review would reliably flag, and not for size: it is a
+  supply-chain and attack-surface habit, and the habit is what carries to the next project where
+  the dev dependency is a compiler or a cloud SDK holding credentials. The second stage costs
+  about five lines and one `target:` key.
+
+  *Why `test` derives from `runtime` rather than standing beside it:* 11.6 already paid for the
+  principle when it ran the suite against the live stack — *"testing the exact system that ships
+  is also worth more than testing a faithful copy of it."* A derived stage means the suite
+  exercises the same installed package the services run. Two sibling stages would test a
+  parallel build of it, which is the copy 11.6 declined.
+
+  *Stated plainly, because it is a real cost:* the `runtime` image is the union of three
+  services' needs, so the CLI — a thin HTTP adapter by 3.6 — carries SQLAlchemy and the AMQP
+  client it never imports. That is inherent in one package with one dependency set, and it is
+  accepted rather than engineered around.
+
+  *The build steps this item owns*, per the inventory's "shapes the build steps": dependency
+  layer before source so the cache survives a source edit; a `.dockerignore`; a pinned `slim`
+  base; a non-root `USER`; and **exec-form `CMD`**, which is not cosmetic here — shell form puts
+  a shell at PID 1 and the signal never reaches the process, so whatever 8.8 decides about
+  shutting down without losing an in-flight message would be unimplementable. This item supplies
+  the precondition; 8.8 still owns the behaviour.
+
+  *What FW2 costs, closing 7.5's question through 3.3:* the relay is `entrypoints/relay/main.py`
+  plus a compose entry running the `runtime` image with a different command. **No new image, no
+  new stage, no change to this record.**
+  *Closes 9.3's deferral:* the CLI needs the package and an HTTP client, which `runtime` is.
+
+  *Feeds 2.9, and corrects the axis it was written on:* the inventory offers 2.9 "one dependency
+  set or one per service". Neither is the answer — the split this item needs is **runtime versus
+  dev**, one set for all three services plus a dev group for the suite. 2.9 still owns
+  declaration, pinning, and whether there is a lockfile.
+  *Left to others:* where the image is tagged so four services do not build four times, and the
+  `build`/`target` keys themselves — 11.1. Healthchecks and readiness ordering — 11.2.
+  Environment variables reaching the containers — topic 10.
+  *Source:* R14, R15. *Constrained by:* 3.3, 7.5, 9.3, 11.3, 11.6. *Constrains:* 2.9, 11.1.
 
 - **3.8 Whether the worker uses the same core as the API.** `[decided]`
   *Decision:* **the same core, the same repositories, the same unit of work.** The worker's
@@ -788,11 +940,8 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   canonical hyphenated string. `event_id` (7.2) uses the same scheme and the same generation site.
 
   ```python
-  # domain/order.py                        — layer 1: the type, never the generation
-  OrderId = NewType("OrderId", UUID)       # the alias form is 3.4's; the scheme is this item's
-
-  # application/use_cases/place_order.py   — layer 2
-  order = Order.new(id=OrderId(uuid4()), now=self._clock.now(), ...)
+  # application/use_cases/place_order.py   — layer 2: 3.4 names UUID directly, no NewType
+  order = Order.new(id=uuid4(), now=self._clock.now(), ...)
   with self._uow as uow:
       uow.orders.add(order)                # add returns None
       uow.commit()
@@ -867,6 +1016,9 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   were not asked for. It can be added if a consumer appears.
   The core obtains "now" through a **clock port** (3.4), never by importing a time module —
   otherwise no test asserting on timestamps can be deterministic.
+  *Amended after 7.5:* the outbox row carries two further timestamps — `created_at` and the
+  nullable `published_at` — so the count above covers the two entities, not the whole schema.
+  They are adapter bookkeeping on a table nothing reads (7.5), not business time.
   *Source:* `CLAUDE.md` §5. *Answers:* the timestamp half of Q10's response shape.
 
 
@@ -907,6 +1059,29 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   *Why:* it is the only reading that implements R5 as written. Evaluating the condition anywhere other than the core would put a business rule in a transport adapter, which `CLAUDE.md` §3 forbids.
   *Rejected:* publishing only on `BAKING` — it matches the business narrative but leaves an explicit requirement unimplemented, which a reviewer reading R5 will see immediately.
   *Source:* R5, `CLAUDE.md` §3. *Answers:* Q1.
+
+- **5.4 Driver selection rule.** `[decided]`
+  *Decision:* **the earliest-registered `AVAILABLE` driver** — `ORDER BY created_at ASC, id ASC`
+  inside 8.9's claim statement. The rule is deterministic and carries **no business content**: it
+  is a tie-breaker, chosen so that a test can assert which driver was claimed rather than which
+  set it came from.
+  *Why oldest-first rather than any other total order:* R7 asks for "**an** `AVAILABLE` driver"
+  and names no preference, so every total order satisfies it equally. `created_at` is the column
+  4.3 already added for exactly this purpose, and first-registered-first-served is what a reader
+  assumes without being told. `id` is the second key so the order is total even when two rows
+  share a timestamp.
+  *Note for 12.1 and U10:* a tie broken by `id` falls to a `uuid4` (4.7) — deterministic for a
+  given dataset, but not predictable before the rows exist. A test that asserts *which* driver is
+  claimed must therefore register them at distinct times, not rely on the second key.
+  *Rejected:* **random selection** — it satisfies R7 equally and destroys the assertion 3.2 relies
+  on to keep the `ORDER BY` from being dropped silently. **Proximity or load** — the interesting
+  rule, and the one the assignment did not ask for; it needs data the claim statement does not
+  have, and would reopen 3.2, 8.9 and 5.8 together. It is FW10.
+  *This closes 3.2's condition rather than firing it.* The reasoning for why an ordering with no
+  business content may live in `infrastructure/db/` is 3.2's and is not restated here; the only
+  fact added is that 5.4 chose such an ordering. 3.4's claim signature therefore takes no criteria
+  argument.
+  *Source:* R7, `CLAUDE.md` §5. *Constrained by:* 3.2, 4.3, 8.9. *Constrains:* 3.4.
 
 - **5.5 Idempotency of assignment.** `[decided]`
   *Decision:* **assignment is idempotent per order.** The worker assigns a driver only to an
@@ -1028,16 +1203,21 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   proposed does.
   **`GET /orders`.** It returns a light representation —
   `id`, `customer_name`, `status`, `assignment_state`, `created_at` — **without** the nested
-  driver object, newest first, capped at the 50 most recent, with no paging and no filters.
+  driver object, newest first, with no cap, no paging and no filters.
   *Why it is not scope creep:* the DoD grades "an easy-to-use console client", and R11 requires
   checking order statuses. Selecting an order by customer name requires a list; the only
   alternative is making a human retype a UUID, which fails the criterion the DoD actually
   names. The endpoint exists to serve a graded requirement, not to round out the API.
   *Why the list omits the driver:* it keeps 6.5's two-keyed-reads decision valid. Nesting a
-  driver per row would turn a list of 50 into 51 queries; omitting it means the list is one
+  driver per row would turn a list of N into N+1 queries; omitting it means the list is one
   query and the detail endpoint is unchanged.
-  *Assumptions recorded:* the cap of 50 and "newest first" are chosen, not required; there is
-  no paging because nothing needs it at this scale.
+  *Assumptions recorded:* "newest first" is chosen, not required. There is **no cap and no
+  paging** — deliberately as a pair. A cap without paging is the worse half of both: it pays
+  paging's price, data that silently falls out of reach, without buying the mechanism that
+  brings it back — and an order the list cannot show is exactly the retyped UUID this endpoint
+  exists to prevent. Unbounded is affordable here because 11.7 resets the environment on
+  `docker compose down`, so the table holds one session's orders, and a row is five short
+  fields. Paging is FW4 if volume ever becomes real.
   **`GET /health`.** It returns `200` when the application can reach the database, `503`
   otherwise — no metrics, no version, no uptime, no per-dependency detail.
   *Why it is not scope creep:* it is infrastructure the deliverable requires, not a user-facing
@@ -1333,7 +1513,8 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   both describe a client used after launch, which is what `run` is.
 
   *Imposes nothing on 3.7:* the CLI needs an image holding `src/pizza/` and an HTTP client, which
-  is what the api and worker images already are. One image or three stays 3.7's call.
+  is what the api and worker images already are. One image or three stayed 3.7's call, which
+  settled on one `runtime` image for all three services.
   *Left to others:* `depends_on` and whether noisy infrastructure is silenced with
   `attach: false` — 11.1, 11.2. Whether any port is published — 11.8, now free of any CLI
   dependency. What the reviewer types in the menu — 1.2. How an unreachable API is displayed —
@@ -1411,7 +1592,7 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   *Accepted cost, recorded as an assumption:* determinism here is conditional, and
   `CLAUDE.md` §5 states it unconditionally. The condition is written down rather than glossed
   over.
-  *Source:* R15, R18, `CLAUDE.md` §5. *Answers:* Q8.
+  *Source:* R15, R18, `CLAUDE.md` §5. *Answers:* Q8. *Deferred to:* FW13.
 
 - **11.7 Volumes and persistence.** `[decided]`
   *Decision:* **no named volumes.** The database and broker write to their containers' own
@@ -1441,6 +1622,239 @@ Phase 3 does not begin while any item is open (`CLAUDE.md` §2).
   *This is what keeps A8 valid:* 11.6 accepted conditional determinism on the promise of a
   clean start. Without persistence, that promise costs one documented command.
   *Source:* R15, `CLAUDE.md` §5, §6. *Answers:* Q17.
+
+
+## Topic 12 — Testing
+
+- **12.1 Risk ranking.** `[decided]`
+  *Decision:* **four scenarios**, and the rule that selected them.
+
+  *The criterion:* **risk = silence × consequence.** A failure that announces itself — `404`,
+  `409`, `422`, a crash — is not a candidate on risk grounds, because the first person to run the
+  system finds it. A failure that is silent but harmless is not one either: that is the reasoning
+  that kept the `outbox` out of 12.3. Both factors must be present, which makes it a product and
+  not a sum. **Cost does not enter the ranking; it breaks ties** — and it broke exactly one.
+
+  | # | Scenario | What only this one asserts | Failure modes |
+  |---|---|---|---|
+  | **1** | **A complete order, `RECEIVED` to `DELIVERED`**, driver registered first | assigned at `BAKING`; **the same** driver after `READY`, not a second; `AVAILABLE` again after `DELIVERED` | F3, F8, F12 |
+  | **2** | **No driver, retry, recovery** — `BAKING` against an empty pool, then a driver registers | the order stays `PENDING`; the message is neither lost nor fatal; assignment follows registration | F7 (recovery) |
+  | **3** | **One driver, two orders** — scarcity and hand-off | no driver is assigned to two orders; a released driver reaches the order waiting for it | F2 (outcome), A13 |
+  | **4** | **API rule enforcement** | `409` on a non-adjacent transition, `422` on invalid input | F9, F13 |
+
+  *Why one scenario may carry several failure modes:* F3, F8 and F12 are not separate events —
+  they are **successive states in the life of one order**. R5 publishes at `BAKING` and again at
+  `READY`, so the duplicate is not an edge case a test has to construct; it is what every order
+  does. Splitting them would build the same order three times to assert one fact each, which is
+  the pyramid `CLAUDE.md` §5 forbids. Scenario 1 is therefore written as the normal path, and
+  collects the failure modes that lie along it.
+
+  *Why scenarios 1 and 2 are not one test:* they share a single assertion — that assignment
+  happens — and nothing else. Scenario 2's subject is what the worker does while it **cannot**
+  assign: the message survives, the consumer does not die on it, and the order is visibly
+  `PENDING` meanwhile. Scenario 1 never enters that state. An earlier draft merged them, arguing
+  that a happy path is a strict subset of the retry path; that holds only for a happy path
+  stopping at `BAKING`. Carried through to `DELIVERED` it asserts two things — the duplicate
+  no-op and the release — that the retry path never reaches.
+
+  *What was ranked and left out:*
+
+  | Candidate | Why not |
+  |---|---|
+  | Retry budget exhausted, `assignment_state = FAILED` (F7 terminal) | a genuine risk, and the one tie the cost rule broke: 1.2's floor puts `TTL × cap` above 60 s and 11.6 gives the suite the shipped configuration, so it would add about a minute to **every** `docker compose up`. FW13 is where it becomes affordable |
+  | Broker unreachable (F4), malformed message (F10) | 12.3 admits neither interface |
+  | Concurrent `PATCH` on one order (F14) | 6.9 is open — there is no decided behaviour to assert against |
+  | Unknown order id (F1) | loud, and a single status code |
+  | Database down mid-assignment (F5), worker crash before ack (F6) | both need process control; F6's partially-applied state is covered by 5.5's guard, which scenario 1 exercises |
+  | The **ghost driver** (4.3) | the inventory flags it as a candidate, and it is not one: it is a **defect state, not a behaviour**. No sequence of legal calls produces it, so there is nothing for a test to drive. What is testable is that assignment writes both sides, which scenario 1 asserts |
+
+  *What this hands to 12.5, and it is a real problem rather than a formality:* scenario 1 ends
+  with a released, `AVAILABLE` driver, while scenarios 2 and 3 both need scarcity. Run in that
+  order their premise dissolves — so **order matters**, and §5 says it must not. 11.6 already
+  named the cause: the driver pool is global, and a "no driver available" scenario cannot be
+  scoped to one test's data. 12.5 owns the resolution; truncating between tests is not available
+  to it, because 12.3 admits no database client and truncation would not clean the wait queue
+  that scenario 2 deliberately leaves occupied.
+
+  *What no scenario covers, stated because the gap is real:* 8.9's row locking is never
+  contended. 8.5 runs one consumer at prefetch 1, so two events are claimed in sequence and
+  scenario 3 would pass with `FOR UPDATE SKIP LOCKED` removed. FW7 is where the mechanism is
+  verified rather than argued.
+
+  *Left to 12.2:* the assertions themselves and the rationale for each. This item ranks and
+  selects; it does not write the tests.
+  *Source:* R18, `CLAUDE.md` §5. *Constrained by:* 11.6, 12.3, A17. *Constrains:* 12.2, 12.4,
+  12.5, 12.8. *Depended on by:* 1.2.
+
+- **12.2 The chosen scenarios.** `[decided]`
+  *Decision:* four scenarios, five test functions, and the assertion set for each. 12.1 selected
+  them; this item states what each one asserts and why each assertion earns its place.
+
+  *Where the rationale lives — three homes at three resolutions, following 13.6's rule that a
+  record which carries no reasoning cannot go stale:*
+
+  | Home | Contents |
+  |---|---|
+  | **This record** | the assertion tables below and the reason for each. **Authoritative** |
+  | **A docstring above each test** | two lines — which scenario, and why it matters (§5) |
+  | **The README** (13.1) | the four scenario names and one line each. **Names only, no reasoning** |
+
+  *The bar every assertion below had to clear:* **assert the state the rule produces, never the
+  response.** An assertion earns its place only if it would fail when the behaviour it names
+  breaks (§5). Over-assertion is the failure mode here, not under-assertion: a test that checks
+  every field breaks on every contract change while catching nothing.
+
+  ---
+
+  **Scenario 1 — Complete order lifecycle.** `test_complete_order_lifecycle`
+  *Description:* register a driver, place an order, and advance it `RECEIVED → PREPARING →
+  BAKING → READY → DELIVERED`.
+  *Goal:* the normal path end to end, and the two failure modes that lie along it — the duplicate
+  event at `READY`, and the release at `DELIVERED`.
+
+  | After | Assertion | Why it earns its place |
+  |---|---|---|
+  | creation | `status=RECEIVED`, `assignment_state=PENDING`, `driver` is `null` | fixes the initial state R1 names, and proves 6.5's key is present-and-`null` rather than absent |
+  | `PREPARING` | `driver` still `null` | the **negative control for 5.3**: if the publish trigger fired on every transition instead of on `BAKING`/`READY`, a driver would already be attached |
+  | `BAKING`, after waiting (12.4) | `assignment_state=ASSIGNED`, `driver.id` is the registered driver, `driver.status=BUSY`, `assigned_at` present | R5 through R8 in one assertion — publish, consume, claim, assign, mark busy |
+  | `READY`, over a bounded observation window (12.4) | still the same `driver.id`, still `ASSIGNED` | R5 publishes a **second** event on every order. If 5.5's guard broke, a second driver would be claimed or the assignment overwritten. This is the only place the duplicate is exercised |
+  | `DELIVERED` | `status=DELIVERED`, `assignment_state=COMPLETED`, `driver.id` **unchanged**, `driver.status=AVAILABLE` | 5.6's release together with 4.4's "`driver_id` is never cleared". Asserting both is what distinguishes a release from an unassignment |
+
+  ---
+
+  **Scenario 2 — Recovery when no driver is available.**
+  `test_recovery_when_a_driver_registers`
+  *Description:* with no `AVAILABLE` driver, place an order and advance it to `BAKING`; observe;
+  then register a driver. **No further `PATCH` is sent** — that is what makes this a retry rather
+  than a re-trigger.
+  *Goal:* R9 and R10 — the worker neither loses the message nor dies on it, and dispatch resumes
+  on its own.
+
+  | After | Assertion | Why it earns its place |
+  |---|---|---|
+  | `BAKING`, over a bounded window | `assignment_state=PENDING`, `driver` is `null` | proves the worker invented no assignment when none was possible. `PENDING` rather than `FAILED` also separates "still retrying" from "gave up" (8.3) |
+  | registering a driver, after waiting | `assignment_state=ASSIGNED`, `driver.id` is that driver, `driver.status=BUSY` | **the whole scenario rests here.** It is the only observable evidence that the rejected message returned from 8.2's wait queue instead of being dropped, and that the consumer was alive to receive it. "The worker did not crash" is not a separate assertion — over HTTP it has no witness, and this outcome is its proof |
+
+  ---
+
+  **Scenario 3 — One driver, two orders.** `test_one_driver_two_orders`
+  *Description:* register exactly one driver; place two orders and advance both to `BAKING`; then
+  advance the assigned one to `DELIVERED`.
+  *Goal:* A13 — one active order per driver — and the composition of release with retry.
+
+  | After | Assertion | Why it earns its place |
+  |---|---|---|
+  | both reach `BAKING`, once settled | **exactly one** order is `ASSIGNED` with that driver; the other is `PENDING` with `driver` `null` | if the claim ignored `status='AVAILABLE'`, or if the assignment failed to mark the driver `BUSY` in the same transaction, **both** orders would show the same driver. This is the assertion that fails if 4.3's cross-table invariant breaks |
+  | the assigned order reaches `DELIVERED`, after waiting | the waiting order becomes `ASSIGNED` to the same driver, `driver.status=BUSY` again | proves release **feeds dispatch**: 5.6 does not merely flip a status, it returns the driver to the claimable pool, and 8.2's wait queue really re-delivers. Scenario 1 releases with nobody waiting; scenario 2 recovers through registration. Neither composes the two |
+
+  *Which of the two orders wins is deliberately not asserted* — that would be an assertion about
+  queue arrival order, which no decision fixes.
+  *This scenario depends on a generous retry budget:* the waiting order must not exhaust its
+  attempts before the delivery happens. 1.2's `TTL × cap ≥ 60 s` floor, which cost 12.1 the
+  exhaustion scenario, is what makes this one safe.
+
+  ---
+
+  **Scenario 4 — API rule enforcement.** Two functions.
+  *Goal:* the two rules this project **invented** rather than inherited — A3's strictly linear,
+  single-step chain, and 4.2's edge validation.
+
+  `test_illegal_transition_is_refused`
+
+  | Request | Assertion | Why it earns its place |
+  |---|---|---|
+  | `RECEIVED → BAKING` | `409` | 5.1 forbids skipping. R2 lists the chain in a way that makes a skip look permissible, so this is the reading a reviewer will probe |
+  | then read the order | `status` still `RECEIVED` | a `409` that partially applied would be worse than no rule at all |
+  | current status re-sent | `409` | 5.1's least obvious half — re-sending the current status is illegal. It is what removes the "does a repeated `PATCH` re-publish" question, and nothing else exercises it |
+
+  `test_invalid_input_is_refused`
+
+  | Request | Assertion | Why it earns its place |
+  |---|---|---|
+  | order with `items: []` | `422` | 4.2's bounds are the only thing standing between an unbounded field and the core |
+  | order carrying an unknown field | `422` | 4.2 chose `extra="forbid"`, which is a **declaration, not code** — exactly the kind of thing that vanishes silently in a schema rewrite, with nothing else in the system noticing |
+  | `PATCH` with an unrecognised status string | `422`, **not** `409` | this is why 5.2 exists. If both returned one code, the illegal-transition test above could no longer tell a rule failure from a typo |
+
+  ---
+
+  *What is never asserted, and why each is deliberate:*
+  the dispatch log line — 8.6 rules it out explicitly; timestamp **values** — only `assigned_at`'s
+  presence matters, and 4.8 gives the core a clock port precisely so nothing depends on wall time;
+  echoed input (`customer_name`, `address`, `items`) — no rule reads them (4.2), so an assertion
+  would test the framework; the `outbox` row — 12.3.
+
+  *Depends on, and each is resolved before U10 by `CLAUDE.md` §2:* 6.2 for the success codes on
+  creation — the tables above name only the codes 5.2 and 4.2 already fixed; 12.4 for the waiting
+  primitive and the bounded observation window; 12.5 for the precondition scenarios 2 and 3 share
+  — no `AVAILABLE` driver beyond the ones they register themselves.
+  *Source:* R18, DoD "Test Automation". *Constrained by:* 12.1, 12.3, A17. *Constrains:* 12.4,
+  12.5, 12.7, 13.1. *Answers:* Q16 in full.
+
+- **12.3 Interface each test drives.** `[decided]`
+  *Decision:* **HTTP only — for assertions and for arranging state.** The integration suite
+  speaks to the API over HTTP and to nothing else: no database client, no broker client, no
+  control over containers. 12.4's waiting primitive polls `GET /orders/{id}`.
+
+  *Why HTTP is not merely sufficient, but the surface this system was built to expose:* 6.5 and
+  6.6 were decided so that internal state is observable from outside — the nested driver object,
+  `assignment_state`, `assigned_at`, the order list. Reading the same facts with SQL would go
+  around a surface that exists for exactly this purpose. It is also the contract the CLI speaks
+  (3.6) and the one a reviewer can reproduce with `curl`, so a failed assertion is a failure they
+  can repeat by hand rather than one the suite has to explain.
+
+  *What HTTP covers — counted, not asserted:*
+
+  | Behaviour | Observed as |
+  |---|---|
+  | Successful dispatch (R7, R8) | nested driver, `ASSIGNED`, `assigned_at` (6.5) |
+  | No driver, retry, then assignment (R9) | `PENDING`, then `ASSIGNED` |
+  | Retry budget exhausted (8.3) | `assignment_state: FAILED` |
+  | Driver release at `DELIVERED` (5.6) | `driver.status: AVAILABLE` |
+  | Idempotence against the duplicate event (5.5) | the same driver, not a second one |
+  | Illegal transition (5.2) | `409` |
+  | Race for the last driver (F2) | two orders, one driver, exactly one wins |
+
+  *The one thing it cannot see, and why that is acceptable:* the `outbox` row (7.5). A23 states
+  that nothing replays it, so inside the system the table has no reader at all — a forgotten
+  `INSERT` breaks in total silence, and with no consequence. No DoD row degrades, no behaviour
+  changes, no interface reports differently. `CLAUDE.md` §5 ranks candidates by risk, and risk is
+  not silence alone; this is the lowest-consequence failure in the record. If FW2's relay is ever
+  built it becomes a reader, and this changes.
+
+  *Arranging state needs no other interface either:* 11.6 already chose unique data per test over
+  truncation between tests, resting on the clean start 11.7 supplies. There is nothing for a
+  database client to set up.
+
+  *What this costs, stated plainly:* the broker-unreachable path (7.6) gets no automated test. It
+  is the highest-consequence failure mode in the design (F4) and the likeliest interview
+  question, and it stays a documented trade-off (13.4) instead of a scenario. Covering it would
+  need both interfaces this item rejects — the `outbox` read, and a way to make the broker
+  unreachable from inside the test container. 1.2 left the same path out of the demo path for the
+  same reason; the two exclusions agree by construction rather than by coincidence.
+
+  *Rejected — **HTTP plus database inspection**.* The orthodox integration-test arrangement, and
+  the strongest alternative. Its only unique yield here is the `outbox`, which is the item above.
+  **The rejection rests on the boundary, not on the dependency:** 3.7 runs the suite from a stage
+  derived from the services' own image, so SQLAlchemy is present and the read costs no install —
+  and it is still declined, because an assertion against a column couples the test to a schema that
+  `CLAUDE.md` §5 calls an implementation detail, and a rename would then fail a test whose named
+  behaviour did not break.
+  *Rejected — **direct broker publication**.* Only a poison-message scenario needs it, and 8.4 is
+  still open. It carries a defect of its own: the message is composed by the test, so the suite
+  can pass against a shape the API never emits.
+  *Rejected — **container control from inside the suite***, mounting `/var/run/docker.sock` in
+  order to stop the broker mid-run. A real privilege expansion in a compose file handed to a
+  stranger, for one scenario out of the four R18 allows.
+  *Rejected — **driving the CLI***. 3.6 made it a thin adapter with no logic over this same
+  contract, so the test would assert on terminal output, which is presentation.
+
+  *Reopen condition, written as a rule rather than a list:* a non-HTTP interface is admitted only
+  when a behaviour 12.1 selects has **no HTTP-observable effect at all**. Two candidates exist
+  today — the poison message (8.4) and the broker-unreachable path (7.6) — and if 12.1 chooses
+  either, this item reopens.
+  *Hands to 2.6:* one HTTP client, and nothing else; topic 12 adds nothing to 2.10's list.
+  *Source:* `CLAUDE.md` §5. *Constrained by:* 6.5, 6.6, 11.6, 11.7. *Constrains:* 2.6, 12.1,
+  12.2, 12.4, 12.5. *Feeds:* 13.4.
 
 
 ## Topic 13 — Documentation and deliverables
@@ -1527,7 +1941,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A11** † | `items` is a list of strings, with arbitrary but explicit bounds | 4.2 |
 | **A12** | `GET /orders/{id}` returns a nested driver object, or `null` | 6.5 |
 | **A13** † | Exactly one active order per driver | 5.8 |
-| **A14** † | `GET /orders` exists — light list, newest first, capped at 50 | 6.6 |
+| **A14** † | `GET /orders` exists — light list, newest first, no cap and no paging | 6.6 |
 | **A15** † | `GET /health` exists — `200` when the database is reachable, `503` otherwise | 6.6, 7.5 |
 | **A16** | The mock dispatch notification is one structured `INFO` log line, and not a test assertion target | 8.6 |
 | **A17** † | "3–4 automated tests" means four integration scenarios; unit tests are separate and uncounted | 12.6 *(partial)* |
@@ -1544,4 +1958,5 @@ It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the str
 FW11. A12 previously described the nested driver as produced by a `LEFT JOIN`, which
 contradicted 6.5's decision to use two keyed reads. **6.5 is authoritative**; the register no
 longer names a read mechanism at all. A15 was narrowed on 2026-08-09: it previously required
-the broker to be reachable for `/health` to return `200`, which 7.6 made false.
+the broker to be reachable for `/health` to return `200`, which 7.6 made false. A14 dropped its
+cap on 2026-08-10: the list previously returned the 50 most recent orders.

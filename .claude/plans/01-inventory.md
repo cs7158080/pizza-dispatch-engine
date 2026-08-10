@@ -145,6 +145,10 @@ gaps surfaced.*
 
 - **2.10 Full dependency list for approval.**
   *Decide:* every third-party library, each with a justification, presented as one list.
+  **Two libraries have no other owner and are decided here:** the ASGI server 2.3's framework
+  requires, and the HTTP client the CLI speaks through — 2.6 covers the test client only, and
+  3.6 fixed the CLI as an adapter without naming a library. Both surfaced from assembling the
+  list rather than from reading the items.
   *Why now:* `CLAUDE.md` §6 — "Ask before adding any dependency."
   *Source:* `CLAUDE.md` §6.
 
