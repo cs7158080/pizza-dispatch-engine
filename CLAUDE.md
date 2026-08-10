@@ -189,5 +189,5 @@ A step is done only when all of the following hold:
 2. Its behaviour is verified by a test that would fail if the behaviour broke.
 3. Formatting, linting, and type checks pass.
 4. Documentation and assumptions are updated.
-5. It is committed on its own branch with a conventional commit message.
+5. It is committed on the unit's branch with a conventional commit message.
 6. The main branch still runs.
