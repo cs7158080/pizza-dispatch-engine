@@ -428,7 +428,13 @@ and Part 4 of `03-roadmap.md`).
   *Decision:* **`ruff` for formatting and linting, `mypy` in `strict`**, both configured in
   `pyproject.toml`, both run from a local virtual environment before every commit:
   `ruff format .` while working, then `ruff check .` and `mypy src tests`.
-  Ruff's rule set is the default (`E`, `F`) plus `I` for import order, and nothing else.
+  Ruff's rule set is **its default — `E4`, `E7`, `E9`, `F` — plus `I`** for import order, and
+  nothing else, written as `extend-select = ["I"]`.
+  *Not `select = ["E", "F", "I"]`,* which is the other reading of "the default (`E`, `F`)" and is
+  rejected: spelling `E` in full additionally enables `E501`, and `ruff format` cannot shorten a
+  long string, URL or comment — so `ruff format --check .` and `ruff check .`, two of 14.7's four
+  Definition-of-Done commands, would disagree about the same file. It would also force a
+  `line-length` that this item never chose.
   `strict` covers `src/pizza/` and `tests/` alike. A per-module `ignore_missing_imports` is added
   only for a dependency that ships no type information — `pika` is the expected case, and the
   list is confirmed on the first run rather than guessed.
