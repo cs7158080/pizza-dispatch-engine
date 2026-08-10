@@ -18,7 +18,7 @@ status markers, precisely so that this table cannot be contradicted.
 | Topic | Decided | Open |
 |---|---|---|
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
-| 2 — Stack and tooling | 2.1, 2.2, 2.3, 2.4, 2.5 | 2.6–2.10 |
+| 2 — Stack and tooling | 2.1–2.10 | — |
 | 3 — Architecture and layering | 3.1–3.8 | — |
 | 4 — Data model | 4.2, 4.3, 4.4, 4.7, 4.8 | 4.1, 4.5, 4.6 |
 | 5 — Business rules | 5.1–5.6, 5.8 | 5.7 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **56** | **53** |
+| **Total** | **61** | **48** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -403,6 +403,184 @@ and Part 4 of `03-roadmap.md`).
   `infrastructure`, so the read path reaches the database only through a port.
   *Source:* R20, `CLAUDE.md` §3, §6. *Constrained by:* 2.2, 2.4, 3.1, 3.5, 6.5, 8.9.
   *Constrains:* 3.4. *Realised in:* U5.
+
+- **2.6 Test framework and clients.** `[decided]`
+  *Decision:* **`pytest`, with `httpx` as the only client.** No broker client and no in-process
+  client: 12.3 fixed the suite at HTTP only, and 11.6 runs it from its own container against the
+  live stack, so `fastapi.testclient` is excluded by those items rather than declined here.
+  *Why `httpx` over `requests`:* it ships `py.typed`, so 2.8's checker needs no `types-requests`
+  stub, and it applies a 5 s default timeout where `requests` applies none.
+  *Source:* R18, DoD "Test Automation". *Constrained by:* 2.4, 11.6, 12.3. *Feeds:* 2.10.
+
+- **2.7 Broker client library and retry mechanism.** `[decided]`
+  *Decision:* **`pika`**, the same client in both services.
+  The retry half of this item is not a library question: 8.2 put fixed-delay retry in the broker
+  topology — "no plugin, no timer in our code, no dependency" — so only the client name remains,
+  and 2.4 settled it in passing when it recorded that `pika` is not thread-safe and handed the
+  obligation to 7.7.
+  *Noted for U6:* `pika` offers `BlockingConnection` and no automatic reconnection. 7.7 owns
+  connection lifetime and reconnection on both sides; no library is added for it.
+  *Rejected:* `aio-pika` — excluded by 2.4. `kombu` — an abstraction over AMQP at exactly the
+  point where 8.2 needs direct topology declaration.
+  *Source:* R9, R10, `CLAUDE.md` §6. *Constrained by:* 2.4, 8.2. *Constrains:* 7.7.
+
+- **2.8 Formatter, linter, type checker.** `[decided]`
+  *Decision:* **`ruff` for formatting and linting, `mypy` in `strict`**, both configured in
+  `pyproject.toml`, both run from a local virtual environment before every commit:
+  `ruff format .` while working, then `ruff check .` and `mypy src tests`.
+  Ruff's rule set is the default (`E`, `F`) plus `I` for import order, and nothing else.
+  `strict` covers `src/pizza/` and `tests/` alike. A per-module `ignore_missing_imports` is added
+  only for a dependency that ships no type information — `pika` is the expected case, and the
+  list is confirmed on the first run rather than guessed.
+  *Why `strict` and not the default:* 3.4 defines five `Protocol` ports, and a `Protocol` is
+  structural — nothing declares conformance, so without a static check a renamed adapter method
+  surfaces only at runtime, in the worker, under a message. 2.5's `Mapped[...]` argument assumes
+  the same checker.
+  *Left to others:* whether the checks also gate `docker compose up` — 12.10; whether they run in
+  CI — follows 14.3. **No `pre-commit`:** a framework, a config file and git hooks, to run two
+  commands that §8.3 already requires per step.
+  *Source:* `CLAUDE.md` §8. *Constrains:* 2.9, 2.10. *Left to:* 12.10, 14.3.
+
+- **2.9 Dependency management and pinning.** `[decided]`
+  *Decision:* **`pyproject.toml` is the single declaration; two fully pinned requirements files
+  are generated from it and committed.**
+
+  ```toml
+  [project]
+  requires-python = ">=3.12"
+  dependencies    = [ ... ]          # the list 2.10 approves
+  [project.optional-dependencies]
+  dev = [ ... ]
+  [build-system]
+  requires      = ["setuptools>=68"]
+  build-backend = "setuptools.build_meta"
+  ```
+
+  ```
+  uv pip compile pyproject.toml --universal --python-version 3.12 -o requirements.txt
+  uv pip compile pyproject.toml --universal --python-version 3.12 --extra dev -o requirements-dev.txt
+  ```
+
+  *The problem this item exists to solve.* 3.7 asked for a dependency layer "before the source is
+  copied, so a source edit does not reinstall — the mechanism is 2.9's". `pip install .` needs the
+  source present, so under a `pyproject.toml`-only declaration **no such file exists** and the
+  cached layer is unobtainable. A generated requirements file is a file that can be copied alone:
+
+  ```dockerfile
+  COPY requirements.txt .
+  RUN  pip install -r requirements.txt     # source-independent — this is the answer
+  COPY src/ ./src/
+  RUN  pip install --no-deps .
+  ```
+
+  *Why generated rather than hand-written.* `pyproject.toml` can pin the seven direct dependencies
+  but not the eighteen transitive ones, which are the ones nobody chose and nobody watches.
+  Writing them by hand would be maintaining a resolution a tool computes in one second, and it
+  would put the same fact in two hand-edited places — 13.6's failure mode exactly. A derived file
+  cannot disagree with its source, because it is regenerated rather than edited.
+  *What it buys, and it is a graded row:* the reviewer builds the image on their machine, possibly
+  weeks later. Without a lock the resolution is recomputed then, and a breaking release anywhere in
+  the transitive tree fails a build in which not one line of our code changed. It is the hardest
+  failure here to diagnose, because everyone who built earlier cannot reproduce it.
+
+  *Why `uv pip compile` and not `pip-compile`.* The generator is a local preference and the
+  artifact is not: `uv pip compile` emits a plain pip requirements file, so the image, the reviewer
+  and any future CI see `pip` alone, and `pip-compile` would regenerate the same format if `uv`
+  disappeared. `uv` is therefore a developer tool and **not a dependency** — it appears nowhere in
+  2.10. One thing does turn on it: both generators resolve for the host platform by default, so a
+  lock built on Windows for a Linux image can carry Windows-only packages or omit Linux-only ones.
+  `--universal` resolves across platforms with environment markers, and `pip-tools` has no
+  equivalent.
+
+  *Rejected — `pip install .` with a BuildKit cache mount and no generated file.* The strongest
+  alternative, and it adds nothing to the list. It recovers much of the build speed, since the
+  wheel cache survives between builds. It gives no reproducibility at all — every build re-resolves
+  — and its cache lives in the build host rather than in a committed artifact, so on the reviewer's
+  first build there is no cache at all.
+  *Rejected — exact pins on the seven direct dependencies, no lock.* The right cut if this item
+  were ever cut: it defends most of the risk at zero cost and is defensible in an interview. It
+  leaves transitive releases uncovered and gives no cached layer.
+  *Rejected — `uv.lock`.* uv's own format requires uv to consume, which would put the tool in the
+  image; `uv pip compile` keeps the artifact tool-neutral.
+  *Rejected — `poetry`* (restructures the project for seven modules); ***`setuptools` over
+  `hatchling`*** — the default, it detects src-layout unaided, and nothing is weighed;
+  ***extras over PEP 735 `[dependency-groups]`*** — the group form is cleaner in principle since
+  dev dependencies never reach published metadata, but this package is never published, and
+  `pip install ".[dev]"` works on every pip while `--group` needs pip 25.1.
+
+  *`requires-python = ">=3.12"`.* R12's floor is 3.10; one version is fixed for the local
+  environment and the base image alike, which closes the class of failure where `mypy` passes on
+  one and fails on the other. 4.7 already declined the 3.14 pull.
+  *Failure mode, recorded:* a stale lock. Adding a dependency without regenerating leaves the image
+  without it, and `--no-deps` will not complain. **The declaration and the generated files are
+  always the same commit** — §7's rule for documentation, applied to a derived artifact. The window
+  is narrow because §6 requires approval for any new dependency.
+  *Constrains 11.9:* the base image is a `python:3.12` family, and layer ordering is 11.9's; this
+  item supplies only the fact that a source-independent file exists.
+  *Source:* R14, R20, `CLAUDE.md` §3, §6. *Constrained by:* 2.8, 3.3, 3.7.
+  *Constrains:* 2.10, 11.9. *Realised in:* U1.
+
+- **2.10 Full dependency list for approval.** `[decided]`
+  *Decision:* **ten libraries, approved as one list, declared once in `pyproject.toml` during
+  U1.** The approval is a single up-front act, not an accumulating one: no further approval round
+  occurs inside a unit.
+
+  | Runtime — one set for all three services (3.7) | Why | Owner |
+  |---|---|---|
+  | `fastapi` | the API framework | 2.3 |
+  | `pydantic>=2` | edge schemas and `extra="forbid"`; imported directly, so declared directly | 2.3, 4.2 |
+  | `uvicorn` | **the ASGI server — decided here** | 2.10 |
+  | `sqlalchemy>=2.0` | declarative ORM; the bound is 2.5's semantics | 2.5 |
+  | `psycopg[binary]` | the synchronous PostgreSQL driver | 2.5 |
+  | `pika` | the synchronous AMQP client | 2.7 |
+  | `httpx` | **the CLI's HTTP client — decided here**; the suite uses the same one | 2.10, 2.6 |
+
+  | Dev group | Why | Owner |
+  |---|---|---|
+  | `pytest` | the runner | 2.6 |
+  | `ruff` | format and lint | 2.8 |
+  | `mypy` | type checking in `strict` | 2.8 |
+
+  No stub packages: every entry ships type information except `pika`, which 2.8's override rule
+  covers.
+
+  *`uvicorn` and not `uvicorn[standard]`.* The extra adds `uvloop`, `httptools`, `watchfiles`,
+  `websockets` and `python-dotenv`. `uvloop` accelerates the event loop, and 2.4 recorded that
+  there is no concurrency here to exploit — one CLI user (9.2) and four sequential scenarios;
+  `watchfiles` serves `--reload`; websockets are unused. Five packages for nothing.
+  *Rejected:* `hypercorn`, `granian` — both sound, both needing explanation to a reviewer, neither
+  buying anything over FastAPI's documented default.
+
+  *One `httpx` for both consumers.* 12.3 handed 2.6 "one HTTP client, and nothing else", and 3.6
+  made the CLI a thin HTTP adapter. Two libraries would be two lines for one job.
+  *Rejected:* `requests` — no `py.typed`, so 2.8 would need `types-requests`; and no default
+  timeout, where `httpx` applies 5 s.
+
+  *Two conditional lines, and why they are approved now rather than later.* Two open items can each
+  require a library, and neither is in U1:
+
+  | Conditional | Decided by | Unit | If decided otherwise |
+  |---|---|---|---|
+  | `pydantic-settings` | 10.2 — a typed settings object or raw environment reads | U2 | `os.environ` with a hand-written dataclass — the line is dropped |
+  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | neither alternative needs a dependency — the line is dropped |
+
+  They enter `pyproject.toml` in the same commit as the decision that requires them, and
+  `uv pip compile` is re-run. **"Not incremental" governs the act of approval, not the file being
+  frozen** — what it forbids is a fresh approval round mid-unit, which conditioning them now
+  prevents. Withholding them until 10.2 and 4.6 close would leave this item open and U1 blocked on
+  it. (`pydantic-settings` carries `.env` loading, so there is no separate `python-dotenv`.)
+
+  *Not on the list, and each has an owner:* `uv` — a local tool, not a dependency (2.9);
+  `pip-tools` — dropped with the generator (2.9); `pre-commit` — 2.8; `pytest-asyncio`, `aio-pika`,
+  `asyncpg`, `greenlet` — 2.4; `celery` / `kombu` — 2.7; `tenacity` or any retry library — retry is
+  broker topology (8.2); `structlog` — 8.6 is one `key=value` line and stdlib `logging` covers it;
+  `testcontainers` or the docker SDK — 12.3 rejected container control from the suite;
+  `black` / `isort` / `flake8` — replaced by `ruff`; `requests` — above.
+
+  *Carried forward to 11.9:* `psycopg[binary]` has no musl wheel, so an Alpine base breaks this
+  list. 2.5 recorded it; it is repeated here because the list is where it will be read.
+  *Source:* `CLAUDE.md` §6. *Constrained by:* 2.3, 2.5, 2.6, 2.7, 2.8, 2.9, 3.6, 3.7, 12.3.
+  *Constrains:* 11.9. *Conditional on:* 4.6, 10.2. *Realised in:* U1.
 
 
 ## Topic 3 — Architecture and layering
@@ -984,7 +1162,7 @@ and Part 4 of `03-roadmap.md`).
   above, and stdlib `uuid` gained `uuid7()` only in Python 3.14 — under R12's 3.10 floor it means a
   third-party dependency requiring approval under §6, bought for a property this scale cannot
   measure. If U1 settles on a 3.14+ base image it becomes free and can be reconsidered; that is not
-  a reason to take a dependency now.
+  a reason to take a dependency now. *2.9 has since fixed the floor at 3.12, so this does not arise.*
 
   *Rejected:* **UUID generated by the database** (`DEFAULT gen_random_uuid()`) — it keeps the type
   and inherits every cost of database generation above, for nothing the application call does not
