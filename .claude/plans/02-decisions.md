@@ -33,10 +33,8 @@ status markers, precisely so that this table cannot be contradicted.
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
 | **Total** | **56** | **53** |
 
-**Phase 3 for a unit does not begin while an item that unit depends on is open.** The gate is
-per unit, exactly as Part 4 of `03-roadmap.md` states it, and not global — an earlier wording
-here made it global and contradicted that rule. What `CLAUDE.md` §2 buys is that implementation
-contains no decisions, and that holds per unit once the unit's own inputs are closed.
+Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
+and Part 4 of `03-roadmap.md`).
 
 ---
 

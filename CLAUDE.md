@@ -26,6 +26,14 @@ It applies to every session. Read it before doing anything else.
 **No implementation begins before planning is complete and approved.**
 Planning happens in four ordered phases. Do not skip or merge phases.
 
+**"Complete" means complete for one unit of work.** Phases 2 to 4 run per
+unit: a unit is decided, planned, approved, implemented and merged before
+the next unit is planned. An item is resolved when the unit that depends
+on it is planned — early for anything expensive to reverse, later for
+anything whose cost of change is local. Phase 1 is the exception and runs
+once for the whole system, because a unit cannot be identified before the
+work is mapped.
+
 ### Phase 1 — Planning Inventory
 Before deciding anything, produce a list of **everything that must be decided**.
 This is a list of open questions, not answers. Cover at minimum:
