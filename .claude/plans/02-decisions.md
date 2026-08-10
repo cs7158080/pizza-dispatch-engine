@@ -30,8 +30,8 @@ status markers, precisely so that this table cannot be contradicted.
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
-| 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **64** | **46** |
+| 14 — Git and process | 14.1–14.7 | — |
+| **Total** | **67** | **42** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2215,6 +2215,81 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 14 — Git and process
 
+- **14.1 Public remote.** `[decided]`
+  *Decision:* **`https://github.com/cs7158080/pizza-dispatch-engine`, public** — the link R21 asks
+  for. It already carries the history, so the inventory's timing concern is answered by fact. A
+  clean repository for delivery would discard what 14.5 ships it for.
+  *Consequence, and why 14.6 was verified rather than assumed:* §4 forbids rewriting pushed
+  history, and a public repository exposes its whole past — so a secret committed once stays.
+  *Source:* R21. *Constrained by:* 14.5. *Constrains:* 14.6.
+
+- **14.2 Branch convention and merge style.** `[decided]`
+  *Decision:* **`<type>/u<N>-<slug>`** — `chore/u1-foundation`, `feat/u3-business-core` —
+  **squash-merged; branches are not deleted.** `<type>` is §4's conventional-commit set, and the
+  number makes 14.4's map readable from the branch list. The two branches predating the unit
+  table keep their names.
+  *Why squash, when 14.4 puts a real commit on every step.* The step commits stay on the retained
+  branch; squash decides only what reaches `main`. Counted, a merge-commit `main` would carry
+  about eighty entries — some fifty step commits, thirteen merge nodes with GitHub's default
+  message, and eighteen planning commits — against fourteen under squash. GitHub's commit list is
+  the surface a reviewer opens first, and there fourteen unit-level lines beat eighty mixed ones
+  for a reading measured in minutes.
+  *What it costs and how it is paid:* step grain is not visible from `main`. 14.5 already requires
+  a README section on how the repository was built; one sentence there points at the unit
+  branches — the same verification, in the place a reviewer is already reading. GitHub also
+  carries the step messages into the squashed commit body.
+  **This record reached squash twice by different routes.** The first form argued it from the
+  claim that a merge node carries no information. That is false — it carries the unit boundary —
+  and the claim is withdrawn. The decision stands on signal density alone.
+  *Rejected:* **merge commit** — the more faithful history, and the better choice in a project
+  whose history is not itself a deliverable read under time pressure. **Rebase merge** — every
+  step on `main` with no unit boundary at all.
+  *Branches are kept:* §4 requires separate approval per deletion, and after squash they are where
+  step grain survives.
+  *Source:* `CLAUDE.md` §4. *Constrained by:* 14.4. *Requires:* one README sentence (13.1, 14.5).
+
+- **14.3 How much of the branch-per-unit workflow is executed.** `[decided]`
+  *Decision:* **a pull request per unit — thirteen for code, one for the planning branch — with
+  no self-review stage and no CI.** `gh` is installed locally, so a merge is two commands; like
+  `uv` it is a tool, not a dependency.
+  *Why the pull requests stay:* §4 says "even when working alone", which already answers this
+  item's objection — and that agreement ships (14.5), so departing from it is visible.
+  *No self-review, stated rather than dressed up:* the value is the record, not a review pause a
+  person performs against themselves.
+  *No CI:* R15 already has `docker compose up` run the suite and 11.3 print PASS/FAIL, which
+  outweighs a lint badge; 12.10 may put `ruff` and `mypy` in the same run. **Accepted cost:** a
+  locally skipped check has nothing to catch it.
+  *Planning commits* land directly on `plan/project-planning`, which merges through one pull
+  request carrying Phase 1 and the decisions made so far. From U1 onward a unit's planning — the
+  Phase 2 items that unit depends on, and its Phase 3 document — is the **first commit on that
+  unit's branch**, so one pull request carries the plan and the implementation it produced, and a
+  mid-flight replan (§2 Phase 4) lands in the same place. **No unit lacks a pull request; only
+  commits inside units do.**
+  *Rejected:* **local `--no-ff` merges** — identical `main`, and the deviation §4 pre-emptively
+  named. **A pull request per step** — forty to sixty. **A separate pull request for a unit's
+  planning, before its implementation** — the closest reading of §2 Phase 4, and it buys no real
+  evidence: with no self-review stage a merged pull request records that merge was pressed, not
+  that a review happened. The ordering stays visible anyway, since the planning commit precedes
+  the step commits on the branch. **CI as a required gate** — an external dependency for checks
+  that already run before every commit.
+  *Source:* `CLAUDE.md` §4. *Constrained by:* 14.2, 14.4. *Answers:* 2.8's CI deferral.
+
+- **14.4 Unit-to-commit map.** `[decided]`
+  *Decision:* **one commit per Phase 3 step; one branch and one pull request per unit.** The map
+  is written in each unit's Phase 3 document — the step count is unknown until the unit is
+  planned.
+  *This resolves a contradiction.* §2 Phase 3 ("each step maps to exactly one commit"), §8.5
+  ("committed on its own branch") and §4 ("one branch per plan **step** or feature") put the
+  commit at step grain; Part 4 of `03-roadmap.md` ("one branch and one commit") puts it at unit
+  grain. The outlier is the one in a planning file, which cannot amend the working agreement.
+  *Why the branch is nevertheless per unit:* §4's "or feature" admits it, and a branch per step is
+  forty to sixty branches.
+  *Why not one commit per unit:* §8 gives every **step** a full Definition of Done. That describes
+  a commit, not work in progress.
+  *Two texts narrowed to match:* §8.5 to "on the unit's branch"; Part 4 to "one branch and one
+  pull request, carrying one commit per plan step".
+  *Source:* `CLAUDE.md` §2, §4, §8. *Constrains:* 14.2, 14.3, 14.7, every Phase 3 document.
+
 - **14.5 Whether `CLAUDE.md`, `.claude/`, and the plans directory are committed.** `[decided]`
   *Decision:* **committed, and named in the README.** `CLAUDE.md`, `.claude/settings.json`,
   `.claude/commands/`, `.claude/plans/` and `docs/ai-log.md` all ship.
@@ -2237,6 +2312,35 @@ and Part 4 of `03-roadmap.md`).
   read on their own, and it breaks the grouping that is the whole reason to commit them.
   *Source:* R21, R23, `CLAUDE.md` §4. *Requires:* a "How this repository was built" section in
   the README, written in U13.
+
+- **14.6 `.gitignore` adequacy.** `[decided]`
+  *Decision:* **adequate but for editor directories.** `.vscode/` and `.idea/` sit commented out
+  in the GitHub template and §4 names editor files; both are uncommented, as a step in U1.
+  *Verified with `git check-ignore` over eighteen paths, including ones that do not exist yet.*
+  Three results other items rest on: `.env` ignored, `.env.example` not (10.3); 2.9's generated
+  lock files tracked; `.claude/` matching 14.5 exactly.
+  *Not trimmed:* 224 lines of GitHub template, mostly irrelevant — cutting it risks removing a
+  line that was needed and buys nothing.
+  *Source:* `CLAUDE.md` §4. *Constrained by:* 14.1. *Realised in:* U1.
+
+- **14.7 What "main still runs" means in the early units.** `[decided]`
+  *Decision:* **the strongest verification the system currently supports, as a command that exits
+  zero.** Each unit that adds a level raises the bar permanently.
+
+  | From | "runs" means |
+  |---|---|
+  | U1 | `ruff format --check .` · `ruff check .` · `mypy src tests` · `python -c "import pizza"` |
+  | U4 | + `pytest tests/unit` |
+  | U9 | + `docker compose up` reaches 11.3's PASS summary and the test service exits zero |
+  | U11 | + the same with the full integration suite |
+
+  `python -c "import pizza"` is not filler: 3.3 chose src-layout so an import resolves only
+  through the install, so its failure means the package is not installed.
+  Each Phase 3 document states its own list, and it applies **per step commit** — so `main`
+  satisfies §8.6 after a merge by construction.
+  *Rejected:* treating it as vacuous until U9 — §8.6 would be ceremony for eight units, and
+  nobody starts believing it later.
+  *Source:* `CLAUDE.md` §8. *Constrained by:* 14.4. *Constrains:* every Phase 3 document.
 
 
 ---

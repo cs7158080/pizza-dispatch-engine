@@ -14,7 +14,8 @@ the questions behind them are in `01-inventory.md`.
 
 The work is split into **atomic units**. A unit is a set of changes that only makes sense
 together: it is planned as a whole, implemented as a whole, verified as a whole, and lands as
-one branch and one commit (`CLAUDE.md` §4).
+one branch and one pull request, carrying one commit per plan step (`CLAUDE.md` §4; the grain
+is fixed by 14.4).
 
 **The rule for each unit, in order:**
 
