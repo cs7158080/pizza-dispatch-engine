@@ -229,6 +229,15 @@ gaps surfaced.*
   *Why now:* appears in URLs, event payloads, CLI input ergonomics, and test fixtures.
   *Source:* R1, R4, R11.
 
+- **4.9 Entity shape and operations.** *Appended 2026-08-10, mid-Phase 2.*
+  *Decide:* whether the entities are frozen or mutable; which construction paths exist and what each
+  one enforces; the complete operation set on `Order` and `Driver`, including the two 3.2 left
+  unnamed; and the concrete form of the two status enums.
+  *Why now:* 4.1 asks for a field list, and every field it names is already fixed by a closed item.
+  What remains open is the shape those fields sit in — which 2.5 and 3.2 both presuppose without
+  deciding, and which U3 cannot be planned without.
+  *Source:* R1, R4, `CLAUDE.md` §2 Phase 3. *Constrained by:* 2.5, 3.2, 4.4.
+
 
 ## Topic 5 — Business rules
 

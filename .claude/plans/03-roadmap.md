@@ -30,7 +30,7 @@ one branch and one commit (`CLAUDE.md` §4).
 |---|---|---|---|---|
 | **U1** Foundation | Repository skeleton, package layout, dependency management, formatter/linter/type-checker config, `.gitignore` verification, `docs/ai-log.md` | 1, 2.8–2.10, 3.1, 3.3, 13.5, 14 | — | all |
 | **U2** Configuration | Typed settings object, `.env.example`, config validation at startup | 10 | U1 | U5, U6, U7, U8, U9 |
-| **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces, the `ORDER_READY` event type. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7, 4.8, 5 | U1 | U4, U5, U6, U7, U8 |
+| **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces, the `ORDER_READY` event type. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7–4.9, 5 | U1 | U4, U5, U6, U7, U8 |
 | **U4** Core unit tests | Unit tests for the rules identified as infrastructure-free | 5.7, 12.6, 12.7 | U3 | — |
 | **U5** Persistence | Schema and migrations, repository implementations, the `outbox` table and its insert/mark-published operations (7.5), integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 7.5, 8.9 | U2, U3 | U7, U8 |
 | **U6** Broker adapter | Topology declaration, event serialization (7.3), publisher implementation, connection lifecycle | 2.1, 2.7, 7 | U2, U3 | U7, U8 |
@@ -92,6 +92,16 @@ recorded.
   Adding a sixth status changes a stated requirement rather than extending it, and a reviewer
   comparing the implementation to the brief would see a mismatch. If built, it must be
   additive: the five required statuses keep behaving exactly as specified.
+  *What it would repair — recorded when 4.9 accepted the cost.* Today `DELIVERED` is a claim typed at
+  the CLI and nothing verifies it: an order whose dispatch gave up can be moved there by hand — the
+  customer collected it, or the wrong order was advanced — and the system cannot tell which. 4.9
+  therefore preserves `assignment_state = FAILED` across that transition, because the last thing the
+  system actually observed is that no driver was ever dispatched. **The accepted cost is that one real
+  story records two ways:** with no driver available, a customer collecting before the retry budget
+  expires leaves `COMPLETED`, one collecting after leaves `FAILED` — separated by a timer rather than
+  by anything that happened. FW1 removes it at the source: the terminal state would be produced by an
+  arrival event rather than asserted by a keystroke, so `DELIVERED` becomes evidence instead of a
+  claim, and a self-collected order needs a path of its own.
 
 - **FW2 — Transactional outbox for publishing.** Removes the dual-write window left open by
   whatever 7.5 decides: the event and the status change become atomic, and a publish is never

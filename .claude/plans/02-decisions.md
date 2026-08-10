@@ -20,8 +20,8 @@ status markers, precisely so that this table cannot be contradicted.
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1–2.10 | — |
 | 3 — Architecture and layering | 3.1–3.8 | — |
-| 4 — Data model | 4.2, 4.3, 4.4, 4.7, 4.8 | 4.1, 4.5, 4.6 |
-| 5 — Business rules | 5.1–5.6, 5.8 | 5.7 |
+| 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
+| 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
 | 7 — Broker contract | 7.5, 7.6 | 7.1–7.4, 7.7 |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.5 | 14.1–14.4, 14.6, 14.7 |
-| **Total** | **61** | **48** |
+| **Total** | **64** | **46** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1037,6 +1037,15 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 4 — Data model
 
+- **4.1 Order entity fields.** `[decided]`
+  *Decision:* nine fields, each fixed by the item beside it — `id` (4.7), `customer_name` and
+  `address` (R1), `items` (4.2), `status` (5.1), `assignment_state`, `driver_id`, `assigned_at`
+  (4.4), `created_at` (4.8). Checked against 6.6's light list and 12.2's assertion tables: neither
+  needs a field this list lacks.
+  *Nothing was weighed here.* By the time this item was reached every field had an owner; the
+  residue — the shape the fields sit in — is 4.9.
+  *Source:* R1, R4. *Constrained by:* 4.2, 4.3, 4.4, 4.7, 4.8, 5.1. *Realised in:* U3.
+
 - **4.2 Shape and validation of `items`.** `[decided]`
   *Decision:* `items` is a **list of strings**, validated at the edge before the core sees
   anything:
@@ -1106,6 +1115,11 @@ and Part 4 of `03-roadmap.md`).
   reassignment ever enters scope (driver cancels mid-delivery), a single row per order stops
   being sufficient and moving to an `assignments` table is a real migration, not a free
   extension.
+  *Amended by 4.9 on 2026-08-10, in two places.* **`FAILED` is not terminal.** R5 publishes twice, so
+  an order whose first event exhausted its retry budget can still be assigned by the second —
+  `FAILED → ASSIGNED` occurs on an ordinary path, and the arrow notation above does not show it.
+  **`COMPLETED` is not written unconditionally.** The transition into `DELIVERED` writes it unless the
+  state is `FAILED`, which survives; the reasoning is 4.9's and is not restated here.
   *Source:* assignment §4. *Answers:* Q3.
 
 - **4.7 Identifier scheme.** `[decided]`
@@ -1196,6 +1210,94 @@ and Part 4 of `03-roadmap.md`).
   nullable `published_at` — so the count above covers the two entities, not the whole schema.
   They are adapter bookkeeping on a table nothing reads (7.5), not business time.
   *Source:* `CLAUDE.md` §5. *Answers:* the timestamp half of Q10's response shape.
+
+- **4.9 Entity shape and operations.** `[decided]`
+  *Added during Phase 2 on 2026-08-10:* 4.1's field list is fixed entirely by closed items; what
+  was open is the shape those fields sit in, which 2.5 and 3.2 presuppose without deciding.
+
+  *Decision:* **mutable dataclasses, two construction paths, no constructor invariant, six
+  operations, plain `Enum` with explicit string values.**
+
+  ```python
+  # domain/order.py — layer 1 (3.1): stdlib only
+  _NEXT = {RECEIVED: PREPARING, PREPARING: BAKING, BAKING: READY, READY: DELIVERED}
+
+  @dataclass(frozen=True)
+  class TransitionResult:
+      must_publish: bool                  # 5.3
+      releases_driver: bool               # 5.6
+
+  @dataclass
+  class Order:                            # the nine fields are 4.1
+      @classmethod
+      def new(cls, id, customer_name, address, items, now) -> "Order"   # sets RECEIVED / PENDING
+
+      def advance_to(self, to: OrderStatus) -> TransitionResult:
+          if _NEXT.get(self.status) is not to:
+              raise IllegalTransition(self.status, to)                  # 5.2 → 409
+          self.status = to
+          if to is DELIVERED and self.assignment_state is not FAILED:
+              self.assignment_state = COMPLETED
+          return TransitionResult(must_publish=to in (BAKING, READY),
+                                  releases_driver=to is DELIVERED)
+
+      def can_be_assigned(self) -> bool     # driver_id is None and status is not DELIVERED — 5.5
+      def assign_to(driver_id, now) -> None # writes driver_id, ASSIGNED and assigned_at together
+      def mark_dispatch_failed() -> None    # returns early unless can_be_assigned() — 8.3
+
+  # domain/driver.py — layer 1 · fields are 4.3
+  def mark_busy() -> None   ·   def release() -> None                   # 3.2
+  ```
+
+  *Mutable, not frozen:* 3.2 fixed `advance_to(to) -> TransitionResult` and `driver.release()`, and
+  under frozen the new state has no way out of either method without reopening 3.2. Equality stays
+  the dataclass default; nothing in the design compares entities.
+
+  *Two construction paths:* `new()` is the only place R1's initial `RECEIVED` is written; the
+  generated `__init__` is what 2.5's row→entity mapper calls with all nine fields. A single
+  constructor either lets the mapper omit `status` silently, or moves the `RECEIVED` rule out of the
+  core and into `application/`.
+
+  *No invariant in either:* bounds are 4.2's and are enforced at the edge; the
+  `driver_id`/`assignment_state`/`assigned_at` triple is written by `assign_to` in one statement,
+  with 4.5 as the schema backstop; timezone-awareness is a property of a `timestamptz` column.
+  *Cost:* nothing stops the mapper building an incoherent `Order` — the defence is that exactly one
+  function builds them.
+
+  *Two operations had no owner before this item:* `mark_dispatch_failed()`, which 8.3's exhaustion
+  path writes, and `driver.mark_busy()`, the counterpart of `release()` that 4.3's cross-table
+  invariant needs — an `Order` may not mutate a `Driver`. 4.3 and 3.2 are closed and this is the
+  last open item in U3's gate, so there is no later place for them to land.
+
+  *Guards differ per method, and 8.1 is the reason:* `advance_to` raises, because 5.2 maps its error
+  to `409`. `assign_to` does not — 8.1 enumerates **four exhaustive** ack cases and a raise here is a
+  fifth path; its one caller asks `can_be_assigned()` in the line before. `mark_dispatch_failed`
+  returns rather than raises, as 5.6 does for release. That guard is load-bearing: R5 puts two
+  messages per order in flight, so one can exhaust after the other has assigned or after delivery,
+  and no item fixes the order in which the consumer evaluates 8.1's cases 2 and 4.
+
+  *One line each.* Plain `Enum`, not a `str` mixin — the mapper writes `.value` anyway, the mixin
+  makes `OrderStatus.READY == "READY"` true and lets a raw string cross a typed boundary, and
+  `StrEnum` needs 3.11 against R12's 3.10 floor. `_NEXT` rather than an ordered tuple — terminality
+  becomes a missing key, and all three halves of 5.1 including the illegal same-status resend fall
+  out of one condition. *Weakens two costs stated in 2.5* — the skipped `__init__` and "cannot be
+  frozen" are both hypothetical under this item; 2.5's conclusion is unaffected.
+
+  *`COMPLETED` on `DELIVERED`, except from `FAILED`.* `assignment_state` describes the dispatch.
+  `PENDING` is derivable from `driver_id IS NULL`, so overwriting it loses nothing; `FAILED` is the
+  only value on this axis 8.3 wrote deliberately and the only one with no copy anywhere a reader
+  looks. *Accepted cost:* with no driver available, a customer collecting **before** the retry budget
+  expires leaves `COMPLETED` and one collecting **after** leaves `FAILED` — one real story, two
+  records, separated by a timer. Recorded in FW1.
+  *Rejected:* **unconditional `COMPLETED`**, which is 4.4's current wording — it erases the only
+  record that dispatch gave up, to save one conjunct. **`COMPLETED` only from `ASSIGNED`** — leaves
+  `PENDING` asserting a wait on an order that will never move again.
+
+  *`FAILED` is not terminal:* R5 publishes twice, so `FAILED → ASSIGNED` occurs on an ordinary path.
+  Corrected in 4.4 and 7.6.
+
+  *Source:* R1, R4, `CLAUDE.md` §2, §3. *Constrained by:* 2.5, 3.2, 4.2–4.4, 4.7, 4.8, 5.1–5.6, 8.1,
+  8.3. *Narrows:* 4.4. *Voids one argument in:* 7.6. *Realised in:* U3.
 
 
 ## Topic 5 — Business rules
@@ -1289,6 +1391,47 @@ and Part 4 of `03-roadmap.md`).
   an unrequested feature, which `CLAUDE.md` §6 forbids.
   *Recorded as an explicit assumption* — it is behaviour the assignment does not specify.
   *Source:* R2, R8. *Answers:* Q4. *Defines:* F12.
+
+- **5.7 Which rules are unit-testable without infrastructure.** `[decided]`
+  *Decision:* **the subset provable against `domain/` alone, with no test double of any kind.**
+
+  | Rule | Provable against `domain/` alone | Where it lives |
+  |---|---|---|
+  | **5.1** transition graph | **yes** | `_NEXT` + `advance_to` (4.9) |
+  | **5.2** illegal transition | **the raise, yes;** the `409`/`422` mapping, no | `advance_to` / `entrypoints/api/errors.py` |
+  | **5.3** publish trigger | **yes** | `TransitionResult.must_publish` |
+  | **5.4** driver selection | **no** | the `ORDER BY` inside 8.9's claim |
+  | **5.5** assignment idempotency | **yes** | `can_be_assigned()` |
+  | **5.6** driver release | **both flags, yes;** the coordination, no | `releases_driver`, `driver.release()` / the use case |
+  | **5.8** one active order per driver | **no** | `WHERE status = 'AVAILABLE'` + 4.5's index |
+
+  *Why `domain/` alone and not `application/` with fakes.* A fake `UnitOfWork`, clock and publisher
+  contain no infrastructure, so the literal reading admits them — but `CLAUDE.md` §5 sets three
+  conditions together, and "written in minutes" is the one a fixture module fails. 3.5 made the
+  `UnitOfWork` a `Protocol`, so a fake is genuinely cheap; cheap is not the written test, and
+  `domain/` alone already proves what §5 asks to be proved — that the core is testable in isolation.
+  Use case behaviour is covered by 12.2's four scenarios over HTTP, against the real thing rather
+  than against a simulation.
+  *This item does not touch §5.* Staying inside "free" is what keeps the amendment 12.6 flags
+  unnecessary. How far the unit set may go stays 12.6's; this item only supplies the candidates.
+
+  *The whole unprovable remainder is one SQL statement.* 5.4 is its `ORDER BY` and 5.8 is its
+  `WHERE` — both inside 8.9's single claim, which must be one statement because selecting in Python
+  and then locking is the read-then-lock race 8.9 rejected. 3.2 already recorded why an ordering with
+  no business content may live in `infrastructure/db/`, and the same argument carries 5.8: it is not
+  a rule the core evaluates but a consequence of `drivers.status` being a two-value enum. **§5's "if
+  verifying a business rule requires external services, the rule is in the wrong layer" is therefore
+  answered rather than conceded** — there is no core function here that could be wrong.
+  *The unprovable halves of 5.2 and 5.6 are not exceptions:* 3.2's table already classifies the
+  domain-error → HTTP mapping and publish-after-commit ordering as things that look like rules and
+  are not.
+
+  *Rejected:* **`application/` use cases with fakes** — above. **No unit set at all**, which §5
+  permits since unit tests are an addition rather than a requirement: rejected because four rules are
+  provable with zero setup and A17 already put them outside R18's count, so declining them forfeits
+  §5's demonstration and saves nothing.
+  *Source:* `CLAUDE.md` §5. *Constrained by:* 3.2, 3.5, 4.9, 8.9, 12.2. *Constrains:* 12.6.
+  *Realised in:* U4.
 
 - **5.8 Driver capacity — how many orders one driver can carry.** `[decided]`
   *Added during Phase 2*, because it had been settled implicitly rather than decided. R8 says
@@ -1510,6 +1653,12 @@ and Part 4 of `03-roadmap.md`).
   information without a new state.
   *Rejected:* `503` — above; `202 Accepted` — it describes the request as pending when the
   state change is already durable, and nothing later completes it.
+  *One argument here is void, noted 2026-08-10.* The paragraph above rejects
+  `assignment_state = FAILED` partly because it would require "a `FAILED → ASSIGNED` transition that
+  4.4 does not have". 8.3 writes `FAILED` on retry exhaustion and R5's second publish then assigns,
+  so that transition occurs on an ordinary path regardless; 4.4 is amended accordingly.
+  **The decision is unaffected** — it stands on the second argument, that `PENDING` on an order whose
+  status has advanced already reads as "no driver is coming".
   *Source:* R5, `CLAUDE.md` §5. *Answers:* Q21. *Defines:* F4 with 7.5.
 
 
