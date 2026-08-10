@@ -22,8 +22,11 @@ is fixed by 14.4).
 1. Every topic listed under *Decided by* must be `[decided]` before the unit is planned.
 2. The unit gets its own Phase 3 plan document in `.claude/plans/`.
 3. The unit is implemented, verified against its Definition of Done, and merged.
-4. Only then is the next unit planned. A unit is never planned while a unit it depends on is
-   unfinished — that is what makes the dependency real rather than nominal.
+4. Only then is the next unit's **Phase 3 plan** written. An implementation plan is never written
+   while a unit it depends on is unfinished — that is what makes the dependency real rather than
+   nominal. **Phase 2 is not bound by it:** a unit's decisions are system-level contracts rather
+   than an ordering of steps, so they may be settled at any time, and in parallel with other
+   units.
 
 ## Unit table
 

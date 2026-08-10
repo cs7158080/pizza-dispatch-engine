@@ -2259,12 +2259,14 @@ and Part 4 of `03-roadmap.md`).
   *No CI:* R15 already has `docker compose up` run the suite and 11.3 print PASS/FAIL, which
   outweighs a lint badge; 12.10 may put `ruff` and `mypy` in the same run. **Accepted cost:** a
   locally skipped check has nothing to catch it.
-  *Planning commits* land directly on `plan/project-planning`, which merges through one pull
-  request carrying Phase 1 and the decisions made so far. From U1 onward a unit's planning — the
-  Phase 2 items that unit depends on, and its Phase 3 document — is the **first commit on that
-  unit's branch**, so one pull request carries the plan and the implementation it produced, and a
-  mid-flight replan (§2 Phase 4) lands in the same place. **No unit lacks a pull request; only
-  commits inside units do.**
+  *Planning commits.* Phase 1 and the decisions taken before the split landed through one pull
+  request from `plan/project-planning`. **Phase 2 and Phase 3 then part company, because they run
+  on different clocks.** A unit's remaining Phase 2 items are settled on a short `plan/u<N>-gate`
+  branch and merged to `main` promptly, so parallel sessions and later units see them. Its Phase 3
+  document is the **first commit on the unit's own branch**, followed by the step commits, so one
+  pull request carries the plan and the implementation it produced, and a mid-flight replan
+  (§2 Phase 4) lands in the same place. **No unit lacks a pull request; only commits inside units
+  do.**
   *Rejected:* **local `--no-ff` merges** — identical `main`, and the deviation §4 pre-emptively
   named. **A pull request per step** — forty to sixty. **A separate pull request for a unit's
   planning, before its implementation** — the closest reading of §2 Phase 4, and it buys no real
