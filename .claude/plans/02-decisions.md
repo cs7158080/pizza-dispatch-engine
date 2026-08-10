@@ -439,6 +439,13 @@ and Part 4 of `03-roadmap.md`).
   long string, URL or comment — so `ruff format --check .` and `ruff check .`, two of 14.7's four
   Definition-of-Done commands, would disagree about the same file. It would also force a
   `line-length` that this item never chose.
+  **Ruff's file scope excludes Markdown**, written as `extend-exclude = ["*.md"]` under
+  `[tool.ruff]`. Ruff 0.16 formats fenced `python` blocks inside `.md` files by default, so
+  `ruff format --check .` — one of 14.7's four commands — fails on this file's pseudo-code
+  snippets, whose aligned comments and elided bodies are written to be read, not executed.
+  *Not reformatting the snippets,* which edits decided records to satisfy a formatter meant for
+  source, and subjects every future documentation example to it; *and not narrowing the
+  command's path,* which 14.7 fixes.
   `strict` covers `src/pizza/` and `tests/` alike. A per-module `ignore_missing_imports` is added
   only for a dependency that ships no type information — `pika` is the expected case, and the
   list is confirmed on the first run rather than guessed.

@@ -38,7 +38,7 @@ Each line names the item that owns it, so nothing here is silence.
 ## 3. Branch, commits, and the merge
 
 - **Branch:** `chore/u1-foundation`, cut from `main` (14.2).
-- **Commits:** three ahead of the steps, then one commit per step (14.3, 14.4). Eight in total.
+- **Commits:** four ahead of the steps, then one commit per step (14.3, 14.4). Nine in total.
 - **Merge:** one pull request, squash-merged, its title ending in `(#N)` (14.2, 14.3).
   The branch is not deleted (14.2).
 
@@ -48,12 +48,13 @@ Each line names the item that owns it, so nothing here is silence.
 | B | gate | `docs: decide 2.9's upper version bound instead of borrowing it` |
 | C | planning | `docs: plan the foundation unit, and hand pika's type gap to U6` |
 | D | record | `docs: narrow FW4 to filters and paging, since GET /orders ships` |
+| E | gate | `docs: keep ruff's formatter off the planning documents` |
 | 1 | step | `build: declare the project and add the package skeleton` |
 | 2 | step | `chore: turn on ruff's import rules and mypy strict` |
 | 3 | step | `build: pin the dependency set in generated lock files` |
 | 4 | step | `chore: ignore editor directories and re-verify the ignore rules` |
 
-**None of A–D is a plan step.** 14.4 defines a step as a commit carrying §8's Definition of
+**None of A–E is a plan step.** 14.4 defines a step as a commit carrying §8's Definition of
 Done, and 14.3 places a unit's planning ahead of the steps. That distinction is what makes
 these commits possible at all: before step 1 there is no `src/` for `mypy` to check.
 
@@ -68,6 +69,12 @@ four-line amendment costs more than it buys.
 *Why D is here at all.* FW4 has nothing to do with U1 — it was found while reviewing this plan.
 It rides on this branch by the developer's ruling, for the same reason, and the squash message
 names it so that the merge does not swallow the fact that it was an incidental find.
+
+*Why E exists, after C.* Step 1 could not be committed as C wrote it: `ruff format --check .`
+fails on `02-decisions.md`, because ruff 0.16 formats `python` blocks inside Markdown. 2.8 had
+not fixed ruff's file scope, and step 2 forbids writing formatter settings — so the gap went
+back to Phase 2 rather than being improvised mid-step. E carries the amendment and the places
+below that transcribe it.
 
 ## 4. The Definition of Done that applies to every step
 
@@ -143,6 +150,9 @@ now fixes it. What remains below is only the first kind.
   [build-system]
   requires = ["setuptools>=68"]
   build-backend = "setuptools.build_meta"
+
+  [tool.ruff]
+  extend-exclude = ["*.md"]
   ```
 
   The seven runtime entries and the three dev entries are 2.10's approved list, unchanged and
@@ -151,6 +161,8 @@ now fixes it. What remains below is only the first kind.
   `[tool.setuptools]` section — 2.9 recorded that setuptools detects src-layout unaided.
   The two conditional lines 2.10 names, `pydantic-settings` and `alembic`, are **not** added:
   they enter with the decision that requires them (10.2 in U2, 4.6 in U5).
+  The `[tool.ruff]` section is 2.8's file-scope rule. It is written here and not in step 2
+  because §4's `ruff format --check .` must exit zero at this step's own commit.
 
 - `src/pizza/__init__.py` — empty.
 - `tests/unit/__init__.py` — empty.
@@ -219,7 +231,9 @@ strict = true
 Both lines are transcribed from 2.8, which fixes the `extend-select` form and records why
 `select = ["E", "F", "I"]` is rejected: it enables `E501`, which `ruff format` cannot fix, so
 two of §4's four commands would disagree about the same file. Everything else stays at its
-default, so line length, target version and formatter settings are not written. `strict`
+default, so line length, target version and formatter settings are not written —
+`extend-exclude`, the one exception, is 2.8's file-scope rule and arrived in step 1 for the
+reason given there. `strict`
 covers `src/pizza/` and `tests/` alike because §4's command names both paths.
 
 **README**, appended to *Local development*:
