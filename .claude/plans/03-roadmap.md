@@ -122,8 +122,13 @@ recorded.
   over existing data, not a data-model change. Excluded by A9 and `CLAUDE.md` §6: the
   assignment names exactly one driver endpoint.
 
-- **FW4 — Order listing and filtering.** `GET /orders` with status filters and paging. Related
-  to Q11, which decides only the minimum the CLI needs.
+- **FW4 — Order filtering and paging.** `GET /orders` **is built** (6.6): a light list, newest
+  first, with no cap. What is not built is filtering by status and paging. 6.6 rejected a cap
+  without paging as the worse half of both and left paging to this entry; under 11.7's disposable
+  environment, the volume that would justify it never arrives.
+  *Corrected on 2026-08-11:* this entry previously read "`GET /orders` with status filters and
+  paging", which claimed an endpoint that ships. 6.6 had already written the correct scope —
+  "paging is FW4 if volume ever becomes real".
 
 - **FW5 — Dead-letter inspection and replay.** An operator-facing way to see parked messages
   and requeue them, rather than reading broker internals.

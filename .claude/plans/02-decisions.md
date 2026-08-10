@@ -420,6 +420,10 @@ and Part 4 of `03-roadmap.md`).
   obligation to 7.7.
   *Noted for U6:* `pika` offers `BlockingConnection` and no automatic reconnection. 7.7 owns
   connection lifetime and reconnection on both sides; no library is added for it.
+  It also ships no type information, so the first `import pika` fails `mypy src tests`. **2.8
+  owns the remedy** — a per-module `ignore_missing_imports`, not a global loosening of `strict`.
+  U1 deliberately did not write it early, because 2.8 confirms that list on the first run rather
+  than guessing it, and an unnecessary override is something mypy never flags.
   *Rejected:* `aio-pika` — excluded by 2.4. `kombu` — an abstraction over AMQP at exactly the
   point where 8.2 needs direct topology declaration.
   *Source:* R9, R10, `CLAUDE.md` §6. *Constrained by:* 2.4, 8.2. *Constrains:* 7.7.
@@ -428,7 +432,20 @@ and Part 4 of `03-roadmap.md`).
   *Decision:* **`ruff` for formatting and linting, `mypy` in `strict`**, both configured in
   `pyproject.toml`, both run from a local virtual environment before every commit:
   `ruff format .` while working, then `ruff check .` and `mypy src tests`.
-  Ruff's rule set is the default (`E`, `F`) plus `I` for import order, and nothing else.
+  Ruff's rule set is **its default — `E4`, `E7`, `E9`, `F` — plus `I`** for import order, and
+  nothing else, written as `extend-select = ["I"]`.
+  *Not `select = ["E", "F", "I"]`,* which is the other reading of "the default (`E`, `F`)" and is
+  rejected: spelling `E` in full additionally enables `E501`, and `ruff format` cannot shorten a
+  long string, URL or comment — so `ruff format --check .` and `ruff check .`, two of 14.7's four
+  Definition-of-Done commands, would disagree about the same file. It would also force a
+  `line-length` that this item never chose.
+  **Ruff's file scope excludes Markdown**, written as `extend-exclude = ["*.md"]` under
+  `[tool.ruff]`. Ruff 0.16 formats fenced `python` blocks inside `.md` files by default, so
+  `ruff format --check .` — one of 14.7's four commands — fails on this file's pseudo-code
+  snippets, whose aligned comments and elided bodies are written to be read, not executed.
+  *Not reformatting the snippets,* which edits decided records to satisfy a formatter meant for
+  source, and subjects every future documentation example to it; *and not narrowing the
+  command's path,* which 14.7 fixes.
   `strict` covers `src/pizza/` and `tests/` alike. A per-module `ignore_missing_imports` is added
   only for a dependency that ships no type information — `pika` is the expected case, and the
   list is confirmed on the first run rather than guessed.
@@ -510,7 +527,26 @@ and Part 4 of `03-roadmap.md`).
 
   *`requires-python = ">=3.12"`.* R12's floor is 3.10; one version is fixed for the local
   environment and the base image alike, which closes the class of failure where `mypy` passes on
-  one and fails on the other. 4.7 already declined the 3.14 pull.
+  one and fails on the other.
+  *Why 3.12 and not 3.13.* Nothing in the design distinguishes them: no decision uses a feature
+  one has and the other lacks, both are inside upstream security support, and both carry wheels
+  for all seven runtime distributions. Which of the two is pinned is a **convention**, and 1.3
+  gives a convention one line rather than a rationale manufactured after the fact.
+  *Why not 3.14 — the upper bound, decided here rather than borrowed.* 3.14 defers the evaluation
+  of annotations (PEP 649/749) and exposes them through a new `annotationlib`. Every
+  infrastructure library on 2.10's list reads annotations at runtime: Pydantic builds its
+  validators from them and FastAPI derives dependency injection and the OpenAPI document from
+  them (2.3), and SQLAlchemy's declarative mapping reads `Mapped[...]` to type each column, which
+  is half of 2.5's reason for choosing an ORM at all. **Stated at its real size, this is risk
+  appetite and not breakage:** 3.14 shipped in October 2025 and all three have supported it for
+  months. The point is that a four-day assignment does not take the release that changed the one
+  mechanism its entire stack is built on, for nothing it needs. A second consequence, smaller: a
+  3.14 base makes stdlib `uuid7()` free and reopens 4.7.
+  *An earlier attribution, corrected.* This item previously read "4.7 already declined the 3.14
+  pull". It did not. 4.7 declined **a third-party dependency for `uuid7()`** and left 3.14
+  explicitly open — "if U1 settles on a 3.14+ base image it becomes free and can be
+  reconsidered" — while deferring the version itself to this item. Each record pointed at the
+  other and neither decided the bound; the paragraph above decides it.
   *Failure mode, recorded:* a stale lock. Adding a dependency without regenerating leaves the image
   without it, and `--no-deps` will not complain. **The declaration and the generated files are
   always the same commit** — §7's rule for documentation, applied to a derived artifact. The window
