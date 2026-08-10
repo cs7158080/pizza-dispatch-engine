@@ -1,6 +1,8 @@
-# Normalize line endings to LF in the repository.
-# Windows checkouts stay CRLF-friendly, but files that run inside Linux
-# containers (shell scripts, entrypoints, Dockerfiles) must never carry CRLF.
+# Normalize line endings to LF, in the repository and in the working tree.
+# eol=lf applies on checkout as well, including on Windows — this is deliberate:
+# files that run inside Linux containers (shell scripts, entrypoints,
+# Dockerfiles) must never carry CRLF, and current Windows editors and tools
+# handle LF without complaint.
 * text=auto eol=lf
 
 *.png binary
