@@ -15,3 +15,11 @@ python -c "import pizza"
 
 The package is installed rather than imported from the working directory, so `import pizza`
 failing means the install did not happen.
+
+Before every commit:
+
+```
+ruff format .
+ruff check .
+mypy src tests
+```
