@@ -420,6 +420,10 @@ and Part 4 of `03-roadmap.md`).
   obligation to 7.7.
   *Noted for U6:* `pika` offers `BlockingConnection` and no automatic reconnection. 7.7 owns
   connection lifetime and reconnection on both sides; no library is added for it.
+  It also ships no type information, so the first `import pika` fails `mypy src tests`. **2.8
+  owns the remedy** — a per-module `ignore_missing_imports`, not a global loosening of `strict`.
+  U1 deliberately did not write it early, because 2.8 confirms that list on the first run rather
+  than guessing it, and an unnecessary override is something mypy never flags.
   *Rejected:* `aio-pika` — excluded by 2.4. `kombu` — an abstraction over AMQP at exactly the
   point where 8.2 needs direct topology declaration.
   *Source:* R9, R10, `CLAUDE.md` §6. *Constrained by:* 2.4, 8.2. *Constrains:* 7.7.
