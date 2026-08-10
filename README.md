@@ -23,3 +23,12 @@ ruff format .
 ruff check .
 mypy src tests
 ```
+
+`requirements.txt` and `requirements-dev.txt` are generated from `pyproject.toml` and are
+never edited by hand. After changing `dependencies` or the `dev` extra, regenerate both in
+the same commit:
+
+```
+uv pip compile pyproject.toml --universal --python-version 3.12 -o requirements.txt
+uv pip compile pyproject.toml --universal --python-version 3.12 --extra dev -o requirements-dev.txt
+```
