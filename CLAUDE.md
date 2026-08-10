@@ -58,7 +58,7 @@ Resolve every item in the inventory, one at a time. For each decision record:
 
 Ambiguity in the requirements is **never resolved silently** — it is recorded as an
 explicit written assumption.
-Nothing moves to Phase 3 while an inventory item is unresolved.
+Nothing moves to Phase 3 for a unit while an item that unit depends on is unresolved.
 
 ### Phase 3 — Implementation Plan
 Convert decisions into an ordered, numbered, step-by-step plan.
