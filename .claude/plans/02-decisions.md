@@ -459,6 +459,18 @@ and Part 4 of `03-roadmap.md`).
   disagree about the same file, and a `line-length` this item never chose would be forced. `E4`,
   `E7` and `E9` named individually do not contain `E501`, which is why the corrected form is not
   that rejected one.
+  *`E501` selected on 2026-08-12, reversing the last sentence above.* The paragraph is kept
+  because the rest of it holds; what it got wrong is treating the two commands as contradicting
+  each other when they **divide the work**. `ruff format` owns code layout and already imposes 88
+  columns on everything it can reformat, so the `line-length` this item believed it never chose
+  has been in force from the first commit. `E501` covers only what the formatter will not touch —
+  strings, URLs, comments and docstrings — and three of those four are ours to write short.
+  *What forced it:* twenty docstring lines written during U3 sat between 89 and 94 columns and no
+  command noticed; a review did. This item chose `select` for "the property that does not decay",
+  and that was decay.
+  *The accepted cost is the one the rejection named, unchanged:* a URL or string literal that
+  genuinely cannot be shortened has no automatic fix and takes a `# noqa: E501`. The repository
+  holds none today, and the rule set is now `E4`, `E7`, `E9`, `E501`, `F`, `I`.
   **Ruff's file scope excludes Markdown**, written as `extend-exclude = ["*.md"]` under
   `[tool.ruff]`. Ruff 0.16 formats fenced `python` blocks inside `.md` files by default, so
   `ruff format --check .` — one of 14.7's four commands — fails on this file's pseudo-code
