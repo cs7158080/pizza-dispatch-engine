@@ -228,3 +228,24 @@ recorded.
   *One thing it does not break:* an overlay merged with `-f` is not a second independent compose
   file, so R14's "one `docker-compose.yml`" survives. 9.3 rejected a second compose file for the
   CLI on that same reading, and the distinction would have to be written there.
+
+- **FW14 — Standard AMQP properties on the message.** Filling `message_id`, `type` and
+  `timestamp` with values the payload already carries, so the management UI and any tracing tool
+  can list and group messages without decoding the body.
+  *Why it is not in scope:* it puts the same fact in two places that nothing keeps in step, for a
+  display the management UI already gives from the body itself. 7.2 keeps one source of truth.
+  *What would trigger it:* a monitoring or tracing tool that reads message metadata.
+  *Cost when taken:* one keyword argument on `basic_publish`, and no change to the consumer —
+  nothing reads properties, so it breaks no contract and needs no coordinated deploy.
+
+- **FW15 — Event-carried state transfer for `ORDER_READY`.** The event carries a snapshot of the
+  order — customer name, items, destination — instead of identifiers alone.
+  *What would trigger it:* the worker no longer sharing a database with the API (3.8), or a
+  driver-selection rule needing a fact the order row does not hold.
+  *Why it is not in scope:* while the row is reachable and current, a snapshot is a second source
+  of truth that goes stale, and 5.5 forbids relying on it — the consumer must read the row
+  regardless, so the fields would be present and unusable. `items` would also be carried in the
+  unstructured form FW11 exists to replace.
+  *Recorded because the developer proposed it as groundwork for driver types:* that feature's rule
+  belongs in `domain/` beside 5.4, and the dispatch use case already holds the order it loaded, so
+  the groundwork is the database read rather than the message.

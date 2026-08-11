@@ -23,7 +23,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
-| 7 — Broker contract | 7.1, 7.5, 7.6 | 7.2, 7.3, 7.4, 7.7 |
+| 7 — Broker contract | 7.1, 7.2, 7.5, 7.6 | 7.3, 7.4, 7.7 |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | — | 10.1–10.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **71** | **39** |
+| **Total** | **72** | **38** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1650,6 +1650,58 @@ and Part 4 of `03-roadmap.md`).
   RabbitMQ preserves the original key by default, and the exchanges are separate — but with them
   each queue names its own destination, so the direction is read rather than reconstructed.
   *Source:* R5, R6, R14. *Constrained by:* 2.1, 3.1, 8.2. *Constrains:* 7.4, 7.7. *Realised in:* U6.
+
+- **7.2 `ORDER_READY` payload schema.** `[decided]`
+  *Decision:* **three fields, identifiers only.** 3.4 placed the type and left its fields here.
+
+  ```python
+  # application/events.py
+  @dataclass(frozen=True)
+  class OrderReadyEvent:
+      EVENT_TYPE: ClassVar[str] = "ORDER_READY"
+
+      event_id:    UUID        # uuid4, generated in the application layer (4.7); the outbox key
+      order_id:    UUID
+      occurred_at: datetime    # UTC-aware, from the Clock port (4.8)
+  ```
+
+  *Why identifiers and not a snapshot — the first reason decides it.* 5.5's guard asks whether the
+  order already has a driver, which is a fact that can change after the message is sent; under
+  8.2's retry cycle the message may be minutes old. The consumer is therefore **required** to read
+  the current row, and a snapshot would be data nobody is permitted to trust. Second, a `status`
+  field on the message invites branching on it, which is the business rule living in two places
+  that `CLAUDE.md` §3 forbids. Third, R5 publishes twice, so the second message would carry a
+  different snapshot of the same order and nothing would say which wins.
+  *`EVENT_TYPE` is a class constant, not an instance field:* a field with one possible value is not
+  data, it is a declaration that can be written wrong. It reaches the wire and the outbox column
+  from the constant.
+  *What `occurred_at` is, and the reason it is not decoration.* It is the **single** `Clock.now()`
+  read the `advance_order_status` use case takes for that invocation. 3.4 fixed
+  `OutboxStore.add(event)` with no time parameter, and 7.5 requires the outbox row to carry
+  `created_at`; taking it from the event is what satisfies both without either adding a parameter
+  to a settled port or letting PostgreSQL supply a `server_default now()` — a second clock, which
+  4.8 rules out because no test can control it. One read, two destinations, equal by construction.
+  It also makes the wait-queue latency readable from one service's log rather than by correlating
+  two.
+  *No attempt counter in the payload:* the message is written once and never republished by us —
+  8.2's cycle moves the same bytes. 7.4 names where the count comes from.
+  *No duplication into AMQP properties:* the payload is the only contract and the deserializer
+  never reads properties, so there is one source of truth. `delivery_mode` (7.4) and
+  `content_type` (7.3) are set, and describe the transport rather than the event. Filling
+  `message_id` and `type` is FW14.
+  *Rejected:* **a full snapshot** — above. **A partial snapshot for 8.6's dispatch line** — it
+  prints `order_id`, `driver_id`, `driver_name`, and is written after a transaction that has
+  already loaded the driver. **A `triggered_by_status` field** — weighed seriously, because the
+  outbox holds two `ORDER_READY` rows per order that differ only by `event_id` and `created_at`.
+  It is declined because the repair the row exists for does not need it: the row says the dispatch
+  of order X was never sent, and FW2's relay republishes from `order_id` alone. The two events are
+  interchangeable by design — that is why R5 publishes twice — so the field would add exactly the
+  branchable status the paragraph above warns against.
+  *Clarifying 7.5, not contradicting it:* that record says the row names "exactly which event was
+  lost". With two interchangeable events per order, what it names is **which order** lost its
+  dispatch, which is the fact the repair needs.
+  *Source:* R5, R6, R17, `CLAUDE.md` §3. *Constrained by:* 3.4, 3.8, 4.7, 4.8, 5.5, 7.5.
+  *Constrains:* 7.3. *Deferred to:* FW14, FW15. *Realised in:* U3 (the type), U6 (the wire).
 
 - **7.5 Publish versus commit ordering.** `[decided]`
   *Decision:* three parts.
