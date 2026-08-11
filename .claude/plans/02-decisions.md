@@ -20,7 +20,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1–2.10 | — |
 | 3 — Architecture and layering | 3.1–3.8 | — |
-| 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
+| 4 — Data model | 4.1–4.5, 4.7, 4.8, 4.9 | 4.6 |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
 | 7 — Broker contract | 7.1–7.7 | — |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **80** | **30** |
+| **Total** | **81** | **29** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1179,6 +1179,120 @@ and Part 4 of `03-roadmap.md`).
   **`COMPLETED` is not written unconditionally.** The transition into `DELIVERED` writes it unless the
   state is `FAILED`, which survives; the reasoning is 4.9's and is not restated here.
   *Source:* assignment §4. *Answers:* Q3.
+
+- **4.5 Uniqueness and integrity constraints.** `[decided]`
+  *Decision:* **three tables, two constraints that are not keys, and no index beyond the primary
+  keys and the one 8.9 requires.**
+
+  ```
+  orders
+    id                uuid         PK
+    customer_name     text         NOT NULL
+    address           text         NOT NULL
+    items             jsonb        NOT NULL
+    status            text         NOT NULL    CHECK — the five values of 5.1
+    assignment_state  text         NOT NULL    CHECK — the four values of 4.4
+    driver_id         uuid         NULL        → drivers.id
+    assigned_at       timestamptz  NULL
+    created_at        timestamptz  NOT NULL
+
+    UNIQUE (driver_id) WHERE assignment_state = 'ASSIGNED'             -- 8.9's backstop
+    CHECK  (assignment_state <> 'ASSIGNED'
+            OR (driver_id IS NOT NULL AND assigned_at IS NOT NULL))    -- 4.9's backstop
+
+  drivers                              outbox
+    id          uuid         PK          event_id      uuid         PK
+    name        text         NOT NULL    event_type    text         NOT NULL
+    status      text         NOT NULL    payload       jsonb        NOT NULL
+                CHECK — AVAILABLE|BUSY   created_at    timestamptz  NOT NULL
+    created_at  timestamptz  NOT NULL    published_at  timestamptz  NULL
+  ```
+
+  No `server_default` on any column: identity is generated in the application (4.7) and every
+  timestamp is one `Clock.now()` read (4.8, 7.2), so a database default would be a second clock
+  no test can control.
+
+  *The organising principle, and everything below follows from it:* **the schema enforces what a
+  single writer cannot guarantee for itself under concurrency. Every rule one writer can hold
+  stays in the layer that owns it.** Without it each line below is taste; with it, the two
+  constraints are the two places the application genuinely cannot be trusted alone.
+
+  *Why the uniqueness constraint is partial and not plain.* 4.4 never clears `driver_id`, so
+  `UNIQUE (driver_id)` would say a driver may carry one order in their entire history — it would
+  reject the second order of a driver who was correctly released, which is ordinary behaviour.
+  Conditioning it on `assignment_state = 'ASSIGNED'` is what 4.4 bought when it kept the two axes
+  independent, and 5.8 already writes it in this form.
+
+  *Why 4.9's backstop is one-directional, which is not the obvious shape.* The tempting form is
+  the biconditional — assigned exactly when there is a driver — and it is **false against a state
+  this design produces deliberately**: an order whose event was lost (7.5) reaches `DELIVERED`
+  having never been dispatched, and 4.9 writes `COMPLETED` on it with `driver_id` still null. The
+  implication that holds in every direction the design allows is the narrow one: `ASSIGNED` implies
+  a driver and a time. It was checked against all six reachable combinations, including
+  `FAILED → ASSIGNED`, which R5's second publish makes an ordinary path.
+
+  *Enum storage — `text` with a `CHECK`, not a native PostgreSQL `ENUM` type.* Three enum types
+  are three schema objects, and adding a value to one is `ALTER TYPE`, which does not compose with
+  the rest of the DDL inside a transaction — an operational cost for exactly the protection a
+  `CHECK` already gives. The `CHECK` also prints the legal values in `\d orders`, so the schema
+  documents itself to a reviewer reading it directly. 4.9 fixed a plain `Enum` with explicit string
+  values and had the mapper write `.value`, so the column holds that string and the repository owns
+  the conversion — no ORM-level enum type is involved in either direction.
+
+  *`items` as `jsonb`, and this is the most arbitrary line in the record.* `text[]` describes the
+  data more precisely and is equally well supported; `jsonb` wins only on there being one such type
+  in the schema rather than two, since `payload` needs it. Nothing reads `items` (4.2), so no query
+  distinguishes them.
+
+  *`payload` as `jsonb` — 7.3's recommendation, accepted on its own argument.* The single question
+  the table is ever asked is which orders lost their dispatch, and 7.2 gives the row no `order_id`
+  column of its own, so that question is `payload ->> 'order_id'` over rows with
+  `published_at IS NULL`. Byte-exactness has no consumer, and FW2's relay would rebuild the message
+  from the content.
+
+  *No `VARCHAR(n)`, anywhere.* 100 and 200 are 4.2's bounds and are enforced at the edge.
+  `CLAUDE.md` §3 puts a rule in exactly one place; a length written in the schema as well is the
+  same rule in two, and the copy that drifts is the one nothing exercises.
+
+  *One foreign key, and no second one.* `orders.driver_id → drivers.id`, with no `ON DELETE`
+  clause: nothing in the system deletes a driver, so the default — refuse — is the correct
+  behaviour rather than an unconsidered one. The outbox has no foreign key to `orders`: its link to
+  the order lives inside the payload, and a constraint there would make the evidence of a failure
+  depend on the row it is evidence about.
+
+  *No index beyond the primary keys and the constraint above.* Four candidates were weighed and all
+  four fail 1.1's ceiling test under 11.7's disposable environment, where the volume that would
+  justify an index never arrives: `orders(created_at)` for 6.6's newest-first list — FW4 already
+  holds the volume story; `drivers(status, created_at)` for 8.9's claim query — a handful of rows,
+  scanned; `orders(driver_id)` for driver history — FW3 is not built (A9), and the partial unique
+  index covers the assigned rows anyway; `outbox(published_at) WHERE published_at IS NULL` for a
+  relay that does not exist (A23).
+
+  *What the schema does not protect — and the three kinds of "not" are different, which is the
+  point of stating them together:*
+
+  | Not protected | Kind | Where the defence is |
+  |---|---|---|
+  | The ghost driver — `drivers.status = BUSY` with no `ASSIGNED` order | **Impossible.** No cross-table `CHECK` exists and 4.3 rejected a trigger | 4.3's single-transaction invariant, held by 3.5's `UnitOfWork` |
+  | An illegal status transition (5.1) | **Impossible.** A `CHECK` sees one row and never its previous value | `domain/`, where 4.9 put `_NEXT` |
+  | The bounds on `items`, `customer_name`, `address` (4.2) | **Possible, and forbidden** — `CLAUDE.md` §3, one rule one place | Edge validation (2.3) |
+  | That an outbox row was written at all | **Possible, and not worth it** — a constraint can forbid a row, never require one | Nothing. 12.3 already records this as the lowest-consequence failure in the design, because A23 gives the table no reader |
+
+  Collapsing these into one list of "things we chose not to constrain" would be the misleading
+  version: two of them were never available, one is available and would be a defect, and only the
+  fourth is a judgement about cost.
+
+  *Rejected:* **a native `ENUM` type per enum** — above. **`VARCHAR` bounded to 4.2's limits** —
+  above. **A biconditional `CHECK` on the assignment triple** — false against the `COMPLETED`
+  without a driver that 7.5's lost event produces. **`text[]` for `items`** — a near-tie, decided on
+  having one JSON type in the schema instead of two. **A `CHECK` on `outbox.event_type`** — one
+  legal value, written from a class constant (7.2). **Any of the four indexes** — above.
+  *Accepted cost:* the two constraints are the only automated defence 4.5 supplies, and neither is
+  loaded by the test suite — 12.3 fixed the suite at HTTP with no database client, so an integrity
+  violation would surface as a `500` rather than as a named assertion. The uniqueness constraint is
+  a last line of defence behind 8.9's row lock; it is expected never to fire.
+  *Source:* R8, DoD "Broker & Consumer". *Constrained by:* 4.1–4.4, 4.7–4.9, 5.1, 5.8, 7.2, 7.5,
+  8.9. *Accepts the recommendation of:* 7.3. *Realised in:* U5.
 
 - **4.7 Identifier scheme.** `[decided]`
   *Decision:* **UUID version 4, generated in the application layer and passed into the entity as
