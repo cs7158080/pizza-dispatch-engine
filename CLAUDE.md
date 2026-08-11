@@ -158,6 +158,11 @@ Phase 2/3, not by writing code and adjusting afterwards.
 - Reject: dead code, unused imports, commented-out blocks, comments restating the obvious,
   broad exception swallowing, inconsistent naming or style between files, speculative
   abstractions, and unrequested extra features.
+- **Comments state purpose and logic, not history.** Rejected alternatives, reopen
+  conditions, cost narration and planning item numbers live in `.claude/plans/` and are
+  rejected in source; a second copy is the one that goes stale. What a comment may carry
+  is what a caller or an implementer must know to use the thing correctly. Test docstrings
+  keep their scenario and why it matters, which §5 requires of them.
 - Style must be consistent across the whole repository regardless of which session
   produced the file.
 - **Log rejected proposals as they happen.** Append one row to `docs/ai-log.md` whenever a
