@@ -23,7 +23,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
-| 7 — Broker contract | 7.5, 7.6 | 7.1–7.4, 7.7 |
+| 7 — Broker contract | 7.1, 7.5, 7.6 | 7.2, 7.3, 7.4, 7.7 |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | — | 10.1–10.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **70** | **40** |
+| **Total** | **71** | **39** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1606,6 +1606,50 @@ and Part 4 of `03-roadmap.md`).
 
 
 ## Topic 7 — Broker contract
+
+- **7.1 Topology.** `[decided]`
+  *Decision:* **four objects, two `direct` exchanges, and a closed dead-letter cycle.** Both
+  services declare all of it, from one function.
+
+  | Object | Kind | Arguments |
+  |---|---|---|
+  | `pizza.orders` | direct exchange | — |
+  | `pizza.orders.dispatch` | queue, bound on `order.ready` | `x-dead-letter-exchange: pizza.orders.retry`, `x-dead-letter-routing-key: order.ready.wait` |
+  | `pizza.orders.retry` | direct exchange | — |
+  | `pizza.orders.dispatch.wait` | queue, bound on `order.ready.wait`, **no consumer** | `x-message-ttl:` 10.4, `x-dead-letter-exchange: pizza.orders`, `x-dead-letter-routing-key: order.ready` |
+
+  The cycle 8.2 specified: the worker rejects with `requeue=false` → `pizza.orders.retry` → the
+  wait queue → the TTL expires → `pizza.orders` → the main queue. The names are module-level
+  constants at the head of `infrastructure/broker/topology.py` (3.1), which is also the only
+  place they appear; publisher and consumer reference them by name. They are **not**
+  configuration: `CLAUDE.md` §3 forbids hardcoded secrets, hosts and ports, and a logical name is
+  none of those, while an environment variable opens the case where the two sides read different
+  values. The TTL is the one tunable in the path.
+
+  *Why both services declare, which is the only real choice here:* declaration is idempotent, so
+  the two calls cost nothing — and it **deletes the startup-ordering dependency rather than
+  managing it**. Neither service cares which came up first.
+  *Why `direct` and two exchanges:* a `direct` exchange delivers to **every** queue whose binding
+  matches, so a single exchange carrying both queues on one key would deliver each event to both
+  at once and re-deliver forever — a loop that assigns drivers twice and reports nothing. Two
+  exchanges make the separation structural.
+  *`mandatory=True` on the publish.* Publisher confirms (7.5) prove the broker accepted the
+  message, not that any queue received it; an unroutable message is discarded and confirmed. With
+  confirm mode enabled, `pika` surfaces the return as `UnroutableError`, so the flag costs one
+  keyword and a topology fault arrives on 3.4's existing `PublishFailed` path instead of
+  vanishing.
+  *Rejected:* **`topic`** — wildcards subscribe to a family of events; there is one event and one
+  consumer, so the pattern would be a rule nobody reads. **`fanout`** — ignores the routing key,
+  which is what keeps the two paths apart. **Declaration by the worker alone** — publishing to a
+  missing exchange closes the channel with a 404, so the API must declare at least the exchange;
+  once it declares one, one shared function is simpler than split ownership.
+  *Operational note, carried into the README:* changing a TTL or any other argument of a queue
+  that already exists fails with `PRECONDITION_FAILED` (406) and closes the channel. The repair is
+  `docker compose down -v` (11.7).
+  *One line on the explicit dead-letter routing keys:* they are not required for correctness —
+  RabbitMQ preserves the original key by default, and the exchanges are separate — but with them
+  each queue names its own destination, so the direction is read rather than reconstructed.
+  *Source:* R5, R6, R14. *Constrained by:* 2.1, 3.1, 8.2. *Constrains:* 7.4, 7.7. *Realised in:* U6.
 
 - **7.5 Publish versus commit ordering.** `[decided]`
   *Decision:* three parts.
