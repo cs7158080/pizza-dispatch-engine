@@ -343,8 +343,18 @@ makes it a no-op on an order that has since been assigned or delivered.
 
 1. The file exists, with the content stated.
 2. The five commands of §4 exit zero, and the layering command prints nothing.
-3. The module contains no AMQP word — no `ack`, `nack`, `reject` or `requeue`. 3.2 puts that
-   selection in the consumer, and this is the check that keeps it there.
+3. The module performs no AMQP call:
+
+   ```
+   grep -nE "\.(ack|nack|reject)\(|basic_|requeue" \
+        src/pizza/application/use_cases/dispatch_order.py
+   ```
+
+   must print nothing. 3.2 puts that selection in the consumer, and this is the check that
+   keeps it there. *Narrowed while executing the step, from "contains no AMQP word":* that
+   form matched the module docstring's own sentence saying the verb lives elsewhere, which
+   documents the boundary rather than crossing it. Rewording prose to satisfy a grep is the
+   shape 2.8 already rejected when ruff asked for decided records to be reformatted.
 4. `pytest tests/unit` still collects eleven.
 
 ---
