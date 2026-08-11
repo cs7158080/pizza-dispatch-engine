@@ -328,7 +328,9 @@ gaps surfaced.*
 - **8.4 Poison message handling.**
   *Decide:* what happens to a malformed message, and whether it can block the queue.
   *Why now:* an unhandled parse error in a nack-requeue loop stops all dispatch — a silent total failure.
-  *Source:* R10, DoD.
+  *Source:* R10, DoD. *Constrained by 7.3 and 7.7* — `deserialize` raises rather than returning a
+  partial event, and 3.1 forbids `entrypoints/worker/consumer.py` from importing either it or its
+  error type, so the `try`/`except` must sit on the infrastructure side of the seam.
 
 - **8.7 Logging format and levels.**
   *Decide:* structured or plain, and correlation by order id across services.
@@ -338,7 +340,9 @@ gaps surfaced.*
 - **8.8 Startup and shutdown behaviour.**
   *Decide:* what the worker does when the broker or database is not yet available, and how it shuts down without losing an in-flight message.
   *Why now:* compose starts everything at once; this is the first thing a reviewer encounters.
-  *Source:* R14, R10.
+  *Source:* R14, R10. *Constrained by 7.7* — it fixes that the worker reconnects and that every
+  connection re-declares the topology before subscribing; the startup wait, the retry cadence and
+  the shutdown path are left here.
 
 
 ## Topic 9 — CLI

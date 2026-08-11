@@ -23,7 +23,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
-| 7 — Broker contract | 7.1–7.6 | 7.7 |
+| 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | — | 10.1–10.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **74** | **36** |
+| **Total** | **75** | **35** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1905,6 +1905,88 @@ and Part 4 of `03-roadmap.md`).
   **The decision is unaffected** — it stands on the second argument, that `PENDING` on an order whose
   status has advanced already reads as "no driver is coming".
   *Source:* R5, `CLAUDE.md` §5. *Answers:* Q21. *Defines:* F4 with 7.5.
+
+- **7.7 Connection lifecycle.** `[decided]`
+  *Decision:* **publisher — one long-lived connection and one channel in confirm mode, opened
+  lazily, guarded by a `threading.Lock`. Consumer — one connection, one channel, the consume loop
+  on the main thread.** This is where 2.4's debt lands: FastAPI serves synchronous handlers from a
+  thread pool, so two concurrent `PATCH` requests are two threads, and `pika` is not thread-safe —
+  two threads on one connection corrupt the protocol stream, which surfaces as a mangled frame or
+  a closed connection rather than a clean crash.
+
+  *The lock covers the whole publish operation* — send, wait for the confirm, and the
+  reconnect-and-retry — so publishes serialise. Each holds one round trip to a broker on the same
+  compose host, against a system driven by a person at a CLI menu.
+
+  *Why long-lived rather than a connection per request — and the alternative is genuinely good.*
+  A private connection per request is thread-safe **by construction**: no lock, no shared state,
+  no staleness. It is rejected first because **7.5 already fixed** that a failed publish is retried
+  "exactly once, after reconnecting", which presupposes a connection that persists between
+  requests and can go stale; per-request the sentence has no meaning, and that item is closed.
+  Second, it pays a TCP handshake, an AMQP handshake, a channel open and a confirm-select on every
+  status update.
+  *Rejected:* **thread-local connections** — an unbounded pool with no owner; threads appear under
+  load and nothing closes their connections at shutdown. **A dedicated publisher thread with an
+  internal queue** — what `pika`'s own documentation recommends, and correct under real
+  concurrency; here it adds a thread, a queue, and a mechanism to return the publish result to the
+  request thread. §3 treats that as a defect at this scale.
+
+  *The connection opens lazily, on the first publish; startup touches the broker not at all.*
+  7.6 fixed that an unreachable broker still returns `200`, and a service that refuses to start
+  without the broker contradicts that one layer down — it makes `docker compose up`
+  order-sensitive, which is exactly what 7.1 declined to be. The ASGI `lifespan` hook — 2.4's
+  single async exception, reserved for composition-root wiring — **constructs the adapter** (local,
+  no I/O) and closes the connection at shutdown if one was opened.
+
+  *What actually bounds the publish in time.* 7.5 promised a bounded attempt and a `PATCH` blocked
+  for at most roughly twice it. **A timer of ours cannot deliver that:** a blocking socket call in
+  Python cannot be interrupted from another thread without closing the socket underneath it. The
+  bound must come from the library's own parameters, both fields of `pika.ConnectionParameters`
+  and both fed from 10.4:
+
+  | Parameter | What it bounds |
+  |---|---|
+  | `socket_timeout` | connection establishment and socket operations — a broker that does not answer |
+  | `blocked_connection_timeout` | the broker signalling `Connection.Blocked` under memory or disk pressure; without it a publish waits **indefinitely**, a failure that presents as a hang rather than an error |
+
+  `connection_attempts` stays at its default of 1, so the bound remains one attempt and one
+  timeout; the worker's startup retries are a different question and belong to 8.8.
+
+  *Heartbeats stay at `pika`'s default, and the reason is worth stating.* `BlockingConnection`
+  services heartbeats only while the application is **inside** a `pika` call. An API that publishes
+  once every few minutes is outside it almost always, so the broker will close the connection on
+  missed heartbeats. **This is the designed path, not a defect** — it is precisely the stale
+  connection 7.5 called the common failure, and `pika` raises immediately on the next publish, at
+  which point the single reconnect opens a fresh connection and publishes. The caller sees nothing.
+  *Rejected:* `heartbeat=0` — the broker would never close an idle connection, but a connection
+  that dies for a real reason then goes undetected, the socket appears open, and the next publish
+  blocks until the operating system's TCP timeout. Minutes, which breaks 7.5's bound.
+  *Asymmetry worth noting:* the worker never has this problem. It sits inside `start_consuming()`,
+  so its heartbeats are serviced continuously.
+
+  *What the single reconnect does:* close the old connection best-effort, open a new connection and
+  channel, **re-declare the topology** through 7.1's `declare()`, re-enter confirm mode, publish
+  once. Failure there is final — `PublishFailed`, and 7.6 takes it from there. Re-declaring is not
+  ceremony: it is idempotent and cheap, and it is the only path by which a broker that came up on
+  an empty volume gets its topology back without restarting a service.
+
+  *The consumer.* One connection, one channel, `basic_qos(prefetch_count=1)` per 8.5,
+  `basic_consume` then `start_consuming()` on the main thread; the order read, the claim and the
+  ack all happen inside the callback on that same thread. **There is no thread-safety problem on
+  this side at all** — there is no second thread, which is the direct dividend of 2.4's synchronous
+  runtime. Every connection, first or subsequent, declares the topology before subscribing.
+  *Boundary with 8.8, which stays open:* 7.7 fixes that reconnection exists and what it consists
+  of. **How long to wait for the broker at startup, at what cadence to retry, and how to shut down
+  without losing an in-flight message are 8.8's**, deliberately left there.
+  *Constraint handed to 8.4:* 3.1 forbids `entrypoints/worker/consumer.py` from importing
+  `infrastructure/`, so it can import neither `deserialize` nor the `SerializationError` needed to
+  catch it (7.3). The `try`/`except` around decoding therefore has to sit on the infrastructure
+  side of that seam; 8.4 decides its shape.
+  *The lock is a consequence of 2.4, and FW12 removes it:* a single event loop serialises channel
+  access by construction, so an async runtime needs no lock. That entry already records this from
+  its side; this is the reference back.
+  *Source:* R5, R10. *Constrained by:* 2.4, 2.7, 3.1, 3.4, 7.1, 7.3, 7.5, 7.6, 8.5.
+  *Constrains:* 8.4, 8.8. *Deferred to:* FW12. *Realised in:* U6, U8.
 
 
 ## Topic 8 — Worker
