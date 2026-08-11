@@ -1489,7 +1489,10 @@ and Part 4 of `03-roadmap.md`).
   provable with zero setup and A17 already put them outside R18's count, so declining them forfeits
   §5's demonstration and saves nothing.
   *Source:* `CLAUDE.md` §5. *Constrained by:* 3.2, 3.5, 4.9, 8.9, 12.2. *Constrains:* 12.6.
-  *Realised in:* U4.
+  *Realised in:* **U3 for the rules it writes** — §8.2 gives every step a test that would fail when
+  its behaviour breaks, and these are exactly the free ones — **and U4 for whatever 12.6 opens
+  beyond them.** The same ordering 14.7 recorded when the `pytest` row moved from U4 to U2: U4 is
+  the unit named for `tests/unit/`, and the unit that writes the rule gets there first.
 
 - **5.8 Driver capacity — how many orders one driver can carry.** `[decided]`
   *Added during Phase 2*, because it had been settled implicitly rather than decided. R8 says
