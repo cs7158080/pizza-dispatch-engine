@@ -23,7 +23,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
-| 7 — Broker contract | 7.5, 7.6 | 7.1–7.4, 7.7 |
+| 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **75** | **35** |
+| **Total** | **80** | **30** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1629,6 +1629,215 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 7 — Broker contract
 
+- **7.1 Topology.** `[decided]`
+  *Decision:* **four objects, two `direct` exchanges, and a closed dead-letter cycle.** Both
+  services declare all of it, from one function.
+
+  | Object | Kind | Arguments |
+  |---|---|---|
+  | `pizza.orders` | direct exchange | — |
+  | `pizza.orders.dispatch` | queue, bound on `order.ready` | `x-dead-letter-exchange: pizza.orders.retry`, `x-dead-letter-routing-key: order.ready.wait` |
+  | `pizza.orders.retry` | direct exchange | — |
+  | `pizza.orders.dispatch.wait` | queue, bound on `order.ready.wait`, **no consumer** | `x-message-ttl:` 10.4, `x-dead-letter-exchange: pizza.orders`, `x-dead-letter-routing-key: order.ready` |
+
+  The cycle 8.2 specified: the worker rejects with `requeue=false` → `pizza.orders.retry` → the
+  wait queue → the TTL expires → `pizza.orders` → the main queue. The names are module-level
+  constants at the head of `infrastructure/broker/topology.py` (3.1), which is also the only
+  place they appear; publisher and consumer reference them by name. They are **not**
+  configuration: `CLAUDE.md` §3 forbids hardcoded secrets, hosts and ports, and a logical name is
+  none of those, while an environment variable opens the case where the two sides read different
+  values. The TTL is the one tunable in the path.
+
+  *Why both services declare, which is the only real choice here:* declaration is idempotent, so
+  the two calls cost nothing — and it **deletes the startup-ordering dependency rather than
+  managing it**. Neither service cares which came up first.
+  *Why `direct` and two exchanges:* a `direct` exchange delivers to **every** queue whose binding
+  matches, so a single exchange carrying both queues on one key would deliver each event to both
+  at once and re-deliver forever — a loop that assigns drivers twice and reports nothing. Two
+  exchanges make the separation structural.
+  *`mandatory=True` on the publish.* Publisher confirms (7.5) prove the broker accepted the
+  message, not that any queue received it; an unroutable message is discarded and confirmed. With
+  confirm mode enabled, `pika` surfaces the return as `UnroutableError`, so the flag costs one
+  keyword and a topology fault arrives on 3.4's existing `PublishFailed` path instead of
+  vanishing.
+  *Rejected:* **`topic`** — wildcards subscribe to a family of events; there is one event and one
+  consumer, so the pattern would be a rule nobody reads. **`fanout`** — ignores the routing key,
+  which is what keeps the two paths apart. **Declaration by the worker alone** — publishing to a
+  missing exchange closes the channel with a 404, so the API must declare at least the exchange;
+  once it declares one, one shared function is simpler than split ownership.
+  *Operational note, carried into the README:* changing a TTL or any other argument of a queue
+  that already exists fails with `PRECONDITION_FAILED` (406) and closes the channel. The repair is
+  `docker compose down -v` (11.7).
+  *One line on the explicit dead-letter routing keys:* they are not required for correctness —
+  RabbitMQ preserves the original key by default, and the exchanges are separate — but with them
+  each queue names its own destination, so the direction is read rather than reconstructed.
+  *Source:* R5, R6, R14. *Constrained by:* 2.1, 3.1, 8.2. *Constrains:* 7.4, 7.7. *Realised in:* U6.
+
+- **7.2 `ORDER_READY` payload schema.** `[decided]`
+  *Decision:* **three fields, identifiers only.** 3.4 placed the type and left its fields here.
+
+  ```python
+  # application/events.py
+  @dataclass(frozen=True)
+  class OrderReadyEvent:
+      EVENT_TYPE: ClassVar[str] = "ORDER_READY"
+
+      event_id:    UUID        # uuid4, generated in the application layer (4.7); the outbox key
+      order_id:    UUID
+      occurred_at: datetime    # UTC-aware, from the Clock port (4.8)
+  ```
+
+  *Why identifiers and not a snapshot — the first reason decides it.* 5.5's guard asks whether the
+  order already has a driver, which is a fact that can change after the message is sent; under
+  8.2's retry cycle the message may be minutes old. The consumer is therefore **required** to read
+  the current row, and a snapshot would be data nobody is permitted to trust. Second, a `status`
+  field on the message invites branching on it, which is the business rule living in two places
+  that `CLAUDE.md` §3 forbids. Third, R5 publishes twice, so the second message would carry a
+  different snapshot of the same order and nothing would say which wins.
+  *`EVENT_TYPE` is a class constant, not an instance field:* a field with one possible value is not
+  data, it is a declaration that can be written wrong. It reaches the wire and the outbox column
+  from the constant.
+  *What `occurred_at` is, and the reason it is not decoration.* It is the **single** `Clock.now()`
+  read the `advance_order_status` use case takes for that invocation. 3.4 fixed
+  `OutboxStore.add(event)` with no time parameter, and 7.5 requires the outbox row to carry
+  `created_at`; taking it from the event is what satisfies both without either adding a parameter
+  to a settled port or letting PostgreSQL supply a `server_default now()` — a second clock, which
+  4.8 rules out because no test can control it. One read, two destinations, equal by construction.
+  It also makes the wait-queue latency readable from one service's log rather than by correlating
+  two.
+  *No attempt counter in the payload:* the message is written once and never republished by us —
+  8.2's cycle moves the same bytes. 7.4 names where the count comes from.
+  *No duplication into AMQP properties:* the payload is the only contract and the deserializer
+  never reads properties, so there is one source of truth. `delivery_mode` (7.4) and
+  `content_type` (7.3) are set, and describe the transport rather than the event. Filling
+  `message_id` and `type` is FW14.
+  *Rejected:* **a full snapshot** — above. **A partial snapshot for 8.6's dispatch line** — it
+  prints `order_id`, `driver_id`, `driver_name`, and is written after a transaction that has
+  already loaded the driver. **A `triggered_by_status` field** — weighed seriously, because the
+  outbox holds two `ORDER_READY` rows per order that differ only by `event_id` and `created_at`.
+  It is declined because the repair the row exists for does not need it: the row says the dispatch
+  of order X was never sent, and FW2's relay republishes from `order_id` alone. The two events are
+  interchangeable by design — that is why R5 publishes twice — so the field would add exactly the
+  branchable status the paragraph above warns against.
+  *Clarifying 7.5, not contradicting it:* that record says the row names "exactly which event was
+  lost". With two interchangeable events per order, what it names is **which order** lost its
+  dispatch, which is the fact the repair needs.
+  *Source:* R5, R6, R17, `CLAUDE.md` §3. *Constrained by:* 3.4, 3.8, 4.7, 4.8, 5.5, 7.5.
+  *Constrains:* 7.3. *Deferred to:* FW14, FW15. *Realised in:* U3 (the type), U6 (the wire).
+
+- **7.3 Serialization and version marker.** `[decided]`
+  *Decision:* **JSON encoded UTF-8**, `content_type="application/json"`, produced by two pure
+  functions in `infrastructure/broker/serialization.py` (3.1; 3.4 kept the format here when it
+  moved the type to `application/`):
+
+  ```python
+  class SerializationError(Exception): ...
+
+  def serialize(event: OrderReadyEvent) -> bytes: ...
+  def deserialize(raw: bytes) -> OrderReadyEvent: ...   # SerializationError on any invalid input
+  ```
+
+  The module imports **stdlib only** — not `pika` — which is what lets the database adapter import
+  it for the outbox row: the dependency is on a format, not on a broker. `UUID` is the canonical
+  hyphenated string and `datetime` is ISO 8601 with an explicit offset, both already fixed by 4.7
+  and 4.8.
+
+  *The same function produces both copies*, the wire message and the stored `payload`. That is the
+  whole point of the outbox row: it is evidence of what was meant to go out, and two functions
+  producing approximately the same thing would make it a guess. The database adapter writes
+  `serialize(event).decode("utf-8")` — a decode that cannot fail on bytes we produced.
+  *Both signatures take and return `bytes`, deliberately.* UTF-8 decoding belongs inside the
+  boundary: with a `str` parameter, malformed bytes raise `UnicodeDecodeError` before
+  `deserialize` is entered, and 8.4's poison-message path would have to catch two families of
+  error instead of one. The module owns the entire conversion from untrusted bytes to a valid
+  event.
+  *No version field.* A version buys one capability — letting one side change while the other is
+  still old. Both services are built from one repository and started by one `docker compose up`,
+  so there is no rolling deploy and no second consumer, and no moment at which the versions can
+  differ. **The tolerant reader is the other half of the same decision:** unknown fields are
+  ignored, required fields missing or invalid raise. That is what makes a later field addition
+  safe without coordination, and it is why a marker is only needed the day a field **changes
+  meaning or disappears** — the condition that reopens this item.
+  *Rejected:* **a binary format** (Protobuf, Avro) — buys size and speed that have no consumer
+  here, and pays in an external schema and a build step. **The database adapter building its own
+  JSON** — two formats that drift. **`OutboxStore.add` taking pre-serialized bytes** — pushes a
+  wire format into the application layer; 3.4 fixed `add(event)`.
+  *Left to 8.4:* what happens to the malformed message itself — discarded, parked, or blocking.
+  7.3 fixes only that the deserializer raises rather than returning something partial.
+  *Recommendation carried to 4.5, which owns the column:* store `payload` as `jsonb`. The one
+  question ever asked of the table is which orders lost their dispatch, and `jsonb` makes it a
+  single query; the byte-exactness `text` preserves has no consumer, since FW2's relay rebuilds
+  the message from the content and whitespace is not the content.
+  *Source:* R5, R6. *Constrained by:* 3.1, 3.4, 4.7, 4.8, 7.2. *Constrains:* 7.7, 8.4.
+  *Recommends to:* 4.5. *Realised in:* U6.
+
+- **7.4 Durability.** `[decided]`
+  *Decision:* **durable exchanges, durable queues, persistent messages** (`delivery_mode=2`).
+  The two switches are independent and neither is worth anything alone: `durable` keeps the
+  *definition* across a broker restart, `delivery_mode=2` writes the *message* to disk. A durable
+  queue holding transient messages comes back empty.
+
+  *The alternative, at its strongest.* 7.5 already accepted a lost event as a failure mode, and R5
+  publishes twice — at `BAKING` and at `READY` — so a single loss is covered. On that reading a
+  broker restart is one more window in a family already conceded, and the disk write buys
+  insurance we declined to buy elsewhere.
+
+  *What that misses is where the messages are sitting.* The messages resident in the broker for
+  any length of time are the ones circling 8.2's wait queue — orders that found no driver, with
+  part of their retry budget already spent. The full scenario: an order publishes at `BAKING`, no
+  driver, the message enters the cycle; the order advances to `READY` and publishes again, also
+  into the cycle; the broker restarts; **both are gone**. The order reaches `DELIVERED` with
+  `assignment_state = PENDING`, no driver, and **no error recorded anywhere** — from the API's
+  side both publishes succeeded and both outbox rows are marked `published_at`, and 8.3's `FAILED`
+  is never written because nothing is left to count attempts. That is a wholly silent failure, and
+  it is categorically worse than the one 7.5 accepted, which at least leaves an unpublished row
+  naming the order. The price is a disk write on a two-hundred-byte message a few times a minute,
+  in a system driven by a person at a CLI menu.
+  *Rejected:* **transient messages** — above. **Quorum queues** — replication across cluster nodes,
+  and compose runs one broker; replicating to replicas that do not exist buys nothing.
+
+  *What it gives, in the three cases that occur:*
+  - **A connection drops while the worker holds an unacknowledged message.** The broker requeues
+    and redelivers it, flagged `redelivered`. This is safe because two other items already closed
+    it: 8.1 acks only after the commit, and 5.5 makes the consumer idempotent. Either the
+    transaction committed and redelivery is a no-op, or it did not and redelivery is a correct
+    retry. There is no third case.
+  - **The broker restarts with messages in the wait queue.** They survive. Expiry is computed from
+    the moment the message entered the queue and is stored with it, so **the TTL does not reset** —
+    downtime counts toward it, and a message whose TTL elapsed while the broker was down is
+    dead-lettered on recovery. The retry cycle resumes where it was.
+  - **What it does not give, stated plainly:** 7.5's window is untouched — a publish that never
+    left is beyond any broker mechanism. And this is single-node durability: it survives a
+    restart, not the loss of the disk.
+
+  *The retry counter 8.3 relied on and never named.* 8.3 capped retries; 8.2 listed "an attempt
+  counter carried in the message" among its rejections. Both hold because **we do not carry one** —
+  RabbitMQ maintains it. Each time a message is dead-lettered the broker updates an `x-death`
+  header holding one entry per *(queue, reason)* pair, each with a `count`. Our cycle produces two:
+
+  | Queue | Reason | What it counts |
+  |---|---|---|
+  | `pizza.orders.dispatch` | `rejected` | worker rejections — **this is the retry budget** |
+  | `pizza.orders.dispatch.wait` | `expired` | TTL expiries |
+
+  The worker reads the **`pizza.orders.dispatch` / `rejected`** entry and compares it to the cap. A
+  message on first delivery carries no `x-death` header at all, which is zero attempts. Three
+  properties make this the right mechanism: the payload stays immutable, so the outbox row remains
+  an exact record; the header is persisted with the message, so the count survives a restart along
+  with everything else; and no code of ours counts.
+  **The hazard worth naming:** the two entries advance together and show the same number. Summing
+  them halves the budget silently. The pair is named explicitly above for that reason.
+  *Semantics of the cap, which 8.3 left open:* the configured value is the number of **retries**;
+  the first delivery is not a retry; the worker gives up when the `rejected` count reaches it. A
+  cap of 3 therefore yields four deliveries.
+  *Rejected:* **a counter column on the order** — a write on a path that otherwise only reads and
+  rejects, duplicating state the broker already holds. **A counter in the payload with
+  republishing** — already rejected by 8.2, and it would give every attempt a new `event_id`.
+  *This completes 8.3 rather than reopening it:* the cap, the terminal `FAILED` state and the ack
+  on exhaustion stand exactly as decided there.
+  *Source:* DoD "Broker & Consumer". *Constrained by:* 7.1, 8.1, 8.2, 8.5, 5.5. *Completes:* 8.3.
+  *Realised in:* U6 (topology), U8 (reading the header).
+
 - **7.5 Publish versus commit ordering.** `[decided]`
   *Decision:* three parts.
   **Ordering** — the `ORDER_READY` publish happens **after** the database transaction commits,
@@ -1719,6 +1928,88 @@ and Part 4 of `03-roadmap.md`).
   status has advanced already reads as "no driver is coming".
   *Source:* R5, `CLAUDE.md` §5. *Answers:* Q21. *Defines:* F4 with 7.5.
 
+- **7.7 Connection lifecycle.** `[decided]`
+  *Decision:* **publisher — one long-lived connection and one channel in confirm mode, opened
+  lazily, guarded by a `threading.Lock`. Consumer — one connection, one channel, the consume loop
+  on the main thread.** This is where 2.4's debt lands: FastAPI serves synchronous handlers from a
+  thread pool, so two concurrent `PATCH` requests are two threads, and `pika` is not thread-safe —
+  two threads on one connection corrupt the protocol stream, which surfaces as a mangled frame or
+  a closed connection rather than a clean crash.
+
+  *The lock covers the whole publish operation* — send, wait for the confirm, and the
+  reconnect-and-retry — so publishes serialise. Each holds one round trip to a broker on the same
+  compose host, against a system driven by a person at a CLI menu.
+
+  *Why long-lived rather than a connection per request — and the alternative is genuinely good.*
+  A private connection per request is thread-safe **by construction**: no lock, no shared state,
+  no staleness. It is rejected first because **7.5 already fixed** that a failed publish is retried
+  "exactly once, after reconnecting", which presupposes a connection that persists between
+  requests and can go stale; per-request the sentence has no meaning, and that item is closed.
+  Second, it pays a TCP handshake, an AMQP handshake, a channel open and a confirm-select on every
+  status update.
+  *Rejected:* **thread-local connections** — an unbounded pool with no owner; threads appear under
+  load and nothing closes their connections at shutdown. **A dedicated publisher thread with an
+  internal queue** — what `pika`'s own documentation recommends, and correct under real
+  concurrency; here it adds a thread, a queue, and a mechanism to return the publish result to the
+  request thread. §3 treats that as a defect at this scale.
+
+  *The connection opens lazily, on the first publish; startup touches the broker not at all.*
+  7.6 fixed that an unreachable broker still returns `200`, and a service that refuses to start
+  without the broker contradicts that one layer down — it makes `docker compose up`
+  order-sensitive, which is exactly what 7.1 declined to be. The ASGI `lifespan` hook — 2.4's
+  single async exception, reserved for composition-root wiring — **constructs the adapter** (local,
+  no I/O) and closes the connection at shutdown if one was opened.
+
+  *What actually bounds the publish in time.* 7.5 promised a bounded attempt and a `PATCH` blocked
+  for at most roughly twice it. **A timer of ours cannot deliver that:** a blocking socket call in
+  Python cannot be interrupted from another thread without closing the socket underneath it. The
+  bound must come from the library's own parameters, both fields of `pika.ConnectionParameters`
+  and both fed from 10.4:
+
+  | Parameter | What it bounds |
+  |---|---|
+  | `socket_timeout` | connection establishment and socket operations — a broker that does not answer |
+  | `blocked_connection_timeout` | the broker signalling `Connection.Blocked` under memory or disk pressure; without it a publish waits **indefinitely**, a failure that presents as a hang rather than an error |
+
+  `connection_attempts` stays at its default of 1, so the bound remains one attempt and one
+  timeout; the worker's startup retries are a different question and belong to 8.8.
+
+  *Heartbeats stay at `pika`'s default, and the reason is worth stating.* `BlockingConnection`
+  services heartbeats only while the application is **inside** a `pika` call. An API that publishes
+  once every few minutes is outside it almost always, so the broker will close the connection on
+  missed heartbeats. **This is the designed path, not a defect** — it is precisely the stale
+  connection 7.5 called the common failure, and `pika` raises immediately on the next publish, at
+  which point the single reconnect opens a fresh connection and publishes. The caller sees nothing.
+  *Rejected:* `heartbeat=0` — the broker would never close an idle connection, but a connection
+  that dies for a real reason then goes undetected, the socket appears open, and the next publish
+  blocks until the operating system's TCP timeout. Minutes, which breaks 7.5's bound.
+  *Asymmetry worth noting:* the worker never has this problem. It sits inside `start_consuming()`,
+  so its heartbeats are serviced continuously.
+
+  *What the single reconnect does:* close the old connection best-effort, open a new connection and
+  channel, **re-declare the topology** through 7.1's `declare()`, re-enter confirm mode, publish
+  once. Failure there is final — `PublishFailed`, and 7.6 takes it from there. Re-declaring is not
+  ceremony: it is idempotent and cheap, and it is the only path by which a broker that came up on
+  an empty volume gets its topology back without restarting a service.
+
+  *The consumer.* One connection, one channel, `basic_qos(prefetch_count=1)` per 8.5,
+  `basic_consume` then `start_consuming()` on the main thread; the order read, the claim and the
+  ack all happen inside the callback on that same thread. **There is no thread-safety problem on
+  this side at all** — there is no second thread, which is the direct dividend of 2.4's synchronous
+  runtime. Every connection, first or subsequent, declares the topology before subscribing.
+  *Boundary with 8.8, which stays open:* 7.7 fixes that reconnection exists and what it consists
+  of. **How long to wait for the broker at startup, at what cadence to retry, and how to shut down
+  without losing an in-flight message are 8.8's**, deliberately left there.
+  *Constraint handed to 8.4:* 3.1 forbids `entrypoints/worker/consumer.py` from importing
+  `infrastructure/`, so it can import neither `deserialize` nor the `SerializationError` needed to
+  catch it (7.3). The `try`/`except` around decoding therefore has to sit on the infrastructure
+  side of that seam; 8.4 decides its shape.
+  *The lock is a consequence of 2.4, and FW12 removes it:* a single event loop serialises channel
+  access by construction, so an async runtime needs no lock. That entry already records this from
+  its side; this is the reference back.
+  *Source:* R5, R10. *Constrained by:* 2.4, 2.7, 3.1, 3.4, 7.1, 7.3, 7.5, 7.6, 8.5.
+  *Constrains:* 8.4, 8.8. *Deferred to:* FW12. *Realised in:* U6, U8.
+
 
 ## Topic 8 — Worker
 
@@ -1773,7 +2064,11 @@ and Part 4 of `03-roadmap.md`).
   and irrecoverable without FW5).
   *Accepted cost, recorded as an assumption:* an order that exhausts its budget is not
   reassigned if a driver registers later. Re-dispatch is deliberately not built.
-  *Source:* R9, R17. *Answers:* Q6. *Defines:* F7.
+  *The counter this cap is measured against is 7.4's* — the broker's `x-death` entry for
+  `pizza.orders.dispatch` with reason `rejected`, not a field of ours. 7.4 also fixes the
+  semantics this record left open: the configured value counts **retries**, so the first delivery
+  is not one.
+  *Source:* R9, R17. *Answers:* Q6. *Defines:* F7. *Completed by:* 7.4.
 
 - **8.5 Consumer concurrency.** `[decided]`
   *Decision:* **one worker replica in compose, prefetch 1.** This is a deployment choice, not
