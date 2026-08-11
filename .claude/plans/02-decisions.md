@@ -22,7 +22,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 3 — Architecture and layering | 3.1–3.8 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
-| 6 — API contract | 6.1, 6.4, 6.5, 6.6, 6.8 | 6.2, 6.3, 6.7, 6.9 |
+| 6 — API contract | 6.1, 6.2, 6.4, 6.5, 6.6, 6.8 | 6.3, 6.7, 6.9 |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **83** | **27** |
+| **Total** | **84** | **26** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1831,6 +1831,60 @@ and Part 4 of `03-roadmap.md`).
   *Source:* R1–R4, R11, R18. *Constrained by:* 4.1, 4.2, 4.3, 4.7, 6.4, 6.5, 6.6, 7.6.
   *Corrects:* 4.7's sample line. *Constrains:* 6.2, 6.3. *Realised in:* U7.
 
+- **6.2 Status codes.** `[decided]`
+  *Decision:* **eight rows, and no deliberate `5xx` anywhere in the system.**
+
+  | Case | Code | Produced by |
+  |---|---|---|
+  | `POST /orders` succeeds | `201` | the router |
+  | `POST /drivers` succeeds | `201` | the router |
+  | `PATCH /orders/{id}/status` succeeds | `200`, carrying the order (6.1) | the router — 7.6 holds this even when the publish failed |
+  | `GET /orders/{id}`, `GET /orders` | `200` | the router |
+  | Order id well-formed but not found | `404` | `OrderNotFound` → `errors.py`'s table (3.1, 3.4) |
+  | Illegal transition | `409` | `IllegalTransition` → the same table (5.2) |
+  | Validation failure — unknown field, bound exceeded, unrecognised status value, malformed UUID in the path | `422` | Pydantic, before the core sees anything (4.2, 5.2) |
+  | `GET /health` cannot reach the database | `503` | the router (6.6) |
+
+  *`201`, and still no `Location` header.* 6.1 rejected the orthodox creation shape on the round
+  trip its header costs, not on the code. The code costs a `status_code=201` argument and is simply
+  the accurate one. *Rejected:* a uniform `200` for every success — the only consumer it would
+  simplify is the CLI, which does not branch on a success code.
+
+  *`PATCH` returns `200` with a body, and `204` is rejected on one fact.* `204` forbids a body, so
+  the code and the body are a single question. The usual argument for a body — a saved round trip —
+  is weak here, since 1.2's demo re-reads the order separately at steps 9 and 12. The argument that
+  holds is `assignment_state`: 4.9 writes `COMPLETED` on the transition into `DELIVERED` **unless the
+  state is `FAILED`, which survives**, so the response to a `PATCH` carries a fact the client did not
+  send and cannot compute — whether a driver was ever dispatched. That is precisely the second axis
+  4.4 exists to express, and `204` would blank it at the moment it is written. Secondary: 6.1 gives
+  `POST`, `PATCH` and `GET` one response schema, and `204` would make `PATCH` the sole exception;
+  12.3's HTTP-only suite would pay a second call for every assertion on a transition's result.
+  *What `204` genuinely buys* is semantic precision when the server has nothing to say. Here it has
+  something to say.
+  **This fills a gap rather than restating one.** 7.6 states `200` with the updated order but argues
+  only why not `5xx`, and 6.1 carried the body into its schema table without defending it. The
+  developer's question surfaced that the body had been written three times and reasoned zero times.
+
+  *`422`, not `404`, for a malformed identifier in the path.* `GET /orders/banana` fails FastAPI's
+  own path-parameter validation, which is the same mechanism, in the same layer, that rejects
+  `{"status": "FLYING"}`. It keeps 5.2's line intact: **malformed input is `422`; a well-formed
+  request the rules refuse is not.** *Rejected:* overriding it to `404` — the reasonable opposite
+  reading, "nothing lives at this URL", and it collapses a garbage identifier and a real-but-absent
+  one into one answer, at the cost of hand-written code to achieve it. Recorded here because it is
+  the one row where a reviewer may expect `404` and receive `422`.
+
+  *"Unknown driver" has no code, because it has no endpoint.* The inventory named it alongside the
+  other three failures; 6.6 has since closed the endpoint list, and no path accepts a driver id —
+  `POST /drivers` supplies one. The failure mode does not exist rather than being left uncoded. It
+  enters this table as `404` if FW3 is ever built.
+
+  *No deliberate `5xx`.* 7.6 already refuses one for an unreachable broker, and nothing else in the
+  design produces a server-side failure by design. An unhandled exception yields FastAPI's `500`,
+  and that is **a defect, not a contract** — stated in those words so that a `500` in a test run
+  reads as a bug rather than as a covered path.
+  *Source:* R1–R4, R18. *Constrained by:* 4.2, 4.4, 4.9, 5.2, 6.1, 6.6, 7.6. *Completes:* 7.6's
+  unargued body. *Constrains:* 6.3, 12.2. *Defines:* F1, F13. *Realised in:* U7.
+
 - **6.4 Driver registration payload.** `[decided]`
   *Decision:* the request body carries **no status field**. Every driver is registered
   `AVAILABLE`. The response — and every later read — includes `status`, whose only two values
@@ -2254,6 +2308,11 @@ and Part 4 of `03-roadmap.md`).
   so that transition occurs on an ordinary path regardless; 4.4 is amended accordingly.
   **The decision is unaffected** — it stands on the second argument, that `PENDING` on an order whose
   status has advanced already reads as "no driver is coming".
+  *The body was asserted here, not argued — 6.2 supplies the argument, 2026-08-11.* Everything above
+  defends the **code**, `200` rather than `5xx`. That the response also carries the updated order was
+  stated in the first line and never justified, and 6.1 then carried it into its schema table on the
+  same footing. 6.2 rejects `204` explicitly, on `assignment_state`: 4.9 lets `FAILED` survive the
+  transition into `DELIVERED`, so the response holds a fact the client did not send.
   *Source:* R5, `CLAUDE.md` §5. *Answers:* Q21. *Defines:* F4 with 7.5.
 
 - **7.7 Connection lifecycle.** `[decided]`
