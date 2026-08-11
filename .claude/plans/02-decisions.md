@@ -23,7 +23,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
-| 7 — Broker contract | 7.1, 7.2, 7.3, 7.5, 7.6 | 7.4, 7.7 |
+| 7 — Broker contract | 7.1–7.6 | 7.7 |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | — | 10.1–10.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **73** | **37** |
+| **Total** | **74** | **36** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1749,6 +1749,73 @@ and Part 4 of `03-roadmap.md`).
   *Source:* R5, R6. *Constrained by:* 3.1, 3.4, 4.7, 4.8, 7.2. *Constrains:* 7.7, 8.4.
   *Recommends to:* 4.5. *Realised in:* U6.
 
+- **7.4 Durability.** `[decided]`
+  *Decision:* **durable exchanges, durable queues, persistent messages** (`delivery_mode=2`).
+  The two switches are independent and neither is worth anything alone: `durable` keeps the
+  *definition* across a broker restart, `delivery_mode=2` writes the *message* to disk. A durable
+  queue holding transient messages comes back empty.
+
+  *The alternative, at its strongest.* 7.5 already accepted a lost event as a failure mode, and R5
+  publishes twice — at `BAKING` and at `READY` — so a single loss is covered. On that reading a
+  broker restart is one more window in a family already conceded, and the disk write buys
+  insurance we declined to buy elsewhere.
+
+  *What that misses is where the messages are sitting.* The messages resident in the broker for
+  any length of time are the ones circling 8.2's wait queue — orders that found no driver, with
+  part of their retry budget already spent. The full scenario: an order publishes at `BAKING`, no
+  driver, the message enters the cycle; the order advances to `READY` and publishes again, also
+  into the cycle; the broker restarts; **both are gone**. The order reaches `DELIVERED` with
+  `assignment_state = PENDING`, no driver, and **no error recorded anywhere** — from the API's
+  side both publishes succeeded and both outbox rows are marked `published_at`, and 8.3's `FAILED`
+  is never written because nothing is left to count attempts. That is a wholly silent failure, and
+  it is categorically worse than the one 7.5 accepted, which at least leaves an unpublished row
+  naming the order. The price is a disk write on a two-hundred-byte message a few times a minute,
+  in a system driven by a person at a CLI menu.
+  *Rejected:* **transient messages** — above. **Quorum queues** — replication across cluster nodes,
+  and compose runs one broker; replicating to replicas that do not exist buys nothing.
+
+  *What it gives, in the three cases that occur:*
+  - **A connection drops while the worker holds an unacknowledged message.** The broker requeues
+    and redelivers it, flagged `redelivered`. This is safe because two other items already closed
+    it: 8.1 acks only after the commit, and 5.5 makes the consumer idempotent. Either the
+    transaction committed and redelivery is a no-op, or it did not and redelivery is a correct
+    retry. There is no third case.
+  - **The broker restarts with messages in the wait queue.** They survive. Expiry is computed from
+    the moment the message entered the queue and is stored with it, so **the TTL does not reset** —
+    downtime counts toward it, and a message whose TTL elapsed while the broker was down is
+    dead-lettered on recovery. The retry cycle resumes where it was.
+  - **What it does not give, stated plainly:** 7.5's window is untouched — a publish that never
+    left is beyond any broker mechanism. And this is single-node durability: it survives a
+    restart, not the loss of the disk.
+
+  *The retry counter 8.3 relied on and never named.* 8.3 capped retries; 8.2 listed "an attempt
+  counter carried in the message" among its rejections. Both hold because **we do not carry one** —
+  RabbitMQ maintains it. Each time a message is dead-lettered the broker updates an `x-death`
+  header holding one entry per *(queue, reason)* pair, each with a `count`. Our cycle produces two:
+
+  | Queue | Reason | What it counts |
+  |---|---|---|
+  | `pizza.orders.dispatch` | `rejected` | worker rejections — **this is the retry budget** |
+  | `pizza.orders.dispatch.wait` | `expired` | TTL expiries |
+
+  The worker reads the **`pizza.orders.dispatch` / `rejected`** entry and compares it to the cap. A
+  message on first delivery carries no `x-death` header at all, which is zero attempts. Three
+  properties make this the right mechanism: the payload stays immutable, so the outbox row remains
+  an exact record; the header is persisted with the message, so the count survives a restart along
+  with everything else; and no code of ours counts.
+  **The hazard worth naming:** the two entries advance together and show the same number. Summing
+  them halves the budget silently. The pair is named explicitly above for that reason.
+  *Semantics of the cap, which 8.3 left open:* the configured value is the number of **retries**;
+  the first delivery is not a retry; the worker gives up when the `rejected` count reaches it. A
+  cap of 3 therefore yields four deliveries.
+  *Rejected:* **a counter column on the order** — a write on a path that otherwise only reads and
+  rejects, duplicating state the broker already holds. **A counter in the payload with
+  republishing** — already rejected by 8.2, and it would give every attempt a new `event_id`.
+  *This completes 8.3 rather than reopening it:* the cap, the terminal `FAILED` state and the ack
+  on exhaustion stand exactly as decided there.
+  *Source:* DoD "Broker & Consumer". *Constrained by:* 7.1, 8.1, 8.2, 8.5, 5.5. *Completes:* 8.3.
+  *Realised in:* U6 (topology), U8 (reading the header).
+
 - **7.5 Publish versus commit ordering.** `[decided]`
   *Decision:* three parts.
   **Ordering** — the `ORDER_READY` publish happens **after** the database transaction commits,
@@ -1893,7 +1960,11 @@ and Part 4 of `03-roadmap.md`).
   and irrecoverable without FW5).
   *Accepted cost, recorded as an assumption:* an order that exhausts its budget is not
   reassigned if a driver registers later. Re-dispatch is deliberately not built.
-  *Source:* R9, R17. *Answers:* Q6. *Defines:* F7.
+  *The counter this cap is measured against is 7.4's* — the broker's `x-death` entry for
+  `pizza.orders.dispatch` with reason `rejected`, not a field of ours. 7.4 also fixes the
+  semantics this record left open: the configured value counts **retries**, so the first delivery
+  is not one.
+  *Source:* R9, R17. *Answers:* Q6. *Defines:* F7. *Completed by:* 7.4.
 
 - **8.5 Consumer concurrency.** `[decided]`
   *Decision:* **one worker replica in compose, prefetch 1.** This is a deployment choice, not
