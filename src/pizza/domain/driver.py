@@ -1,8 +1,7 @@
-"""The driver: four fields (4.3) and the two-state life 5.8 fixes.
+"""The driver: four fields and a two-state life.
 
-Layer 1 of 3.1 — standard library only, and no import of `order.py`: the relationship is
-held once, on `orders.driver_id` (4.4), and a driver never mutates an order. Coordinating
-the two writes is the use case's job (4.9, 3.5).
+A driver carries one order at a time. The link to that order is held on the order, not
+here, and a driver never mutates one.
 """
 
 from dataclasses import dataclass
@@ -25,13 +24,13 @@ class Driver:
 
     @classmethod
     def new(cls, id: UUID, name: str, now: datetime) -> "Driver":
-        """A registered driver is available. `created_at` is 5.4's tie-breaker."""
+        """Build a newly registered driver. `created_at` orders driver selection."""
         return cls(id=id, name=name, status=DriverStatus.AVAILABLE, created_at=now)
 
     def mark_busy(self) -> None:
-        """Taken by an order. The claim that selected them is 8.9's, in the adapter."""
+        """Taken by an order."""
         self.status = DriverStatus.BUSY
 
     def release(self) -> None:
-        """Back into the pool, on the transition into DELIVERED (5.6)."""
+        """Back into the pool, once the order is delivered."""
         self.status = DriverStatus.AVAILABLE

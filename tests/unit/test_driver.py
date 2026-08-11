@@ -1,4 +1,4 @@
-"""The driver half of 5.6, provable against domain/ alone (5.7)."""
+"""The driver's side of release, proved against the entity alone."""
 
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -9,13 +9,13 @@ _NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
 
 def test_a_registered_driver_starts_available_and_returns_to_it() -> None:
-    """The pool must refill, which is the whole reason 5.6 exists.
+    """The pool must refill, which is the whole reason release exists.
 
-    5.6 was added because without release the driver pool is consumed once and never
-    refilled: after as many orders as there are drivers the system sits permanently in
-    the no-driver retry path. A `new()` that started BUSY, or these two methods written
-    the wrong way round, produce exactly that — a demo that stops working on the second
-    order, with every part of the system reporting success.
+    Without it the driver pool is consumed once and never refilled: after as many orders
+    as there are drivers, every later order sits in the no-driver retry path forever. A
+    `new()` starting BUSY, or these two methods written the wrong way round, produce the
+    same thing — a demo that stops working on the second order while every part of the
+    system reports success.
     """
     driver = Driver.new(id=uuid4(), name="Noa", now=_NOW)
 

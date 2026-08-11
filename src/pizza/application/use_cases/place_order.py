@@ -1,9 +1,4 @@
-"""Create an order and store it (R1).
-
-The identifier is generated here rather than by the database (4.7), which is why it is
-known before the transaction opens and needs no read back. `items` arrived bounded and
-trimmed from the edge (4.2); nothing in this layer inspects it.
-"""
+"""Create an order and store it."""
 
 from uuid import UUID, uuid4
 

@@ -1,8 +1,4 @@
-"""Register a driver (R3).
-
-Same shape as placing an order, and deliberately so: identity and time enter the entity
-as arguments, the entity decides its own initial state, and this layer only stores it.
-"""
+"""Register a driver."""
 
 from uuid import UUID, uuid4
 

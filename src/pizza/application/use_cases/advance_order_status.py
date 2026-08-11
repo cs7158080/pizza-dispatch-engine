@@ -1,9 +1,8 @@
-"""Move an order one step, and act on the two facts the transition reports (R2, R5).
+"""Move an order one step, and act on what the transition reports.
 
-This is where 7.5's ordering lives: the transaction commits first, and only then is the
-event published. The accepted failure is a lost event, recorded as an outbox row that
-was never marked published — never a database transaction held open across a network
-call to a second system.
+The event is published only after the transaction commits, so no database lock is held
+across a call to the broker. The accepted cost is a lost event, which the outbox row
+records by staying unpublished.
 """
 
 import logging
@@ -40,8 +39,7 @@ class AdvanceOrderStatus:
             if order is None:
                 raise OrderNotFound(order_id)
 
-            # Raises IllegalTransition when the move is not the adjacent one (5.2).
-            result = order.advance_to(requested_status)
+            result = order.advance_to(requested_status)  # raises IllegalTransition
             uow.orders.save(order)
 
             if result.releases_driver and order.driver_id is not None:
@@ -58,8 +56,7 @@ class AdvanceOrderStatus:
 
             uow.commit()
 
-        # Everything below happens after the commit. 7.5's whole decision is this line
-        # ordering, and nothing between the commit and here touches the transaction.
+        # Past the commit. Nothing below may touch the transaction.
         if event is not None:
             self._publish_and_mark(event)
 
@@ -69,8 +66,8 @@ class AdvanceOrderStatus:
         try:
             self._publisher.publish(event)
         except PublishFailed:
-            # 7.6: the status change already happened, so the request succeeds. The
-            # unpublished row is what names which order lost its dispatch.
+            # The status change is already durable, so the caller still succeeds. The
+            # unpublished row names which order lost its dispatch.
             logger.error(
                 "publish failed for order %s, event %s", event.order_id, event.event_id
             )
@@ -81,6 +78,6 @@ class AdvanceOrderStatus:
                 uow.outbox.mark_published(event.event_id, self._clock.now())
                 uow.commit()
         except OutboxWriteFailed:
-            # Logged, not raised: nothing acts on unpublished rows (3.4). The event did
-            # reach the broker, so the only cost is a row that understates what happened.
+            # Nothing reads unpublished rows, so this costs a row that understates what
+            # happened rather than any behaviour.
             logger.error("could not mark event %s published", event.event_id)

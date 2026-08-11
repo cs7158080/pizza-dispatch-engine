@@ -1,7 +1,7 @@
-"""The order rules 5.7 marks provable against domain/ alone, with no double of any kind.
+"""The order rules, proved against the entity alone with no test double.
 
-Each test names a failure that would otherwise reach production silently; the docstring
-says which one and why it would not be caught elsewhere.
+Each test names the failure it would catch and why that failure would otherwise be
+invisible until the whole system is running.
 """
 
 from datetime import UTC, datetime
@@ -33,11 +33,11 @@ def _an_order() -> Order:
 
 
 def test_the_lifecycle_walks_forward_once_per_step() -> None:
-    """5.1's forward path, and the two flags 5.3 and 5.6 hang off it.
+    """The forward path, and the two flags that hang off it.
 
-    A publish trigger that fired on the wrong transition would dispatch an order that is
-    not baking yet, and a release flag on the wrong one would return a driver mid-delivery
-    — neither shows up anywhere but here until an end-to-end run.
+    A publish trigger firing on the wrong transition would dispatch an order that is not
+    baking yet; a release flag on the wrong one would return a driver mid-delivery.
+    Neither shows up anywhere but here until an end-to-end run.
     """
     order = _an_order()
     expected = [
@@ -55,10 +55,10 @@ def test_the_lifecycle_walks_forward_once_per_step() -> None:
 
 
 def test_skipping_reversing_and_repeating_are_all_refused() -> None:
-    """5.1's three illegal shapes, and the payload 5.2 maps to a 409.
+    """The three illegal shapes, and what the error carries.
 
     A skip would make delivery without dispatch a supported path; a repeat that succeeded
-    would publish ORDER_READY twice for one transition. The error carries both statuses
+    would publish ORDER_READY twice for one transition. The error names both statuses
     because an API that cannot name them turns a rule failure into an opaque conflict.
     """
     skipping = _an_order()
@@ -80,12 +80,12 @@ def test_skipping_reversing_and_repeating_are_all_refused() -> None:
 
 
 def test_an_order_admits_exactly_one_driver() -> None:
-    """5.5, both clauses.
+    """Both clauses of the assignment guard.
 
     Dropping "no driver yet" assigns a second driver to an order already on its way.
     Dropping "not delivered" lets a retrying event assign a driver after the only
-    transition that could ever release them has passed — a driver leaking out of the pool
-    permanently, which no interface reports.
+    transition that could release them has passed, leaking that driver out of the pool
+    permanently — which no interface reports.
     """
     assigned = _an_order()
     assert assigned.can_be_assigned() is True
@@ -99,11 +99,11 @@ def test_an_order_admits_exactly_one_driver() -> None:
 
 
 def test_a_failed_dispatch_survives_delivery() -> None:
-    """4.9's conjunct on the DELIVERED transition.
+    """Delivery does not erase a failed dispatch.
 
-    FAILED is the only value on this axis anything writes deliberately, and the only one
-    with no copy elsewhere. An unconditional COMPLETED would erase the record that
-    dispatch gave up, using a status update that has nothing to do with it.
+    FAILED is the only assignment state written deliberately, and the only one with no
+    copy anywhere else. Overwriting it on delivery would erase the record that no driver
+    was ever found, through a status update that has nothing to do with it.
     """
     order = _an_order()
     order.mark_dispatch_failed()
@@ -117,11 +117,11 @@ def test_a_failed_dispatch_survives_delivery() -> None:
 
 
 def test_giving_up_is_ignored_once_a_driver_is_assigned() -> None:
-    """4.9 calls this guard load-bearing, and the reason is R5.
+    """Giving up is ignored once a driver is on the way.
 
     Two messages per order are in flight, so one can exhaust its retry budget after the
     other has already assigned. Without the guard the exhausted message would mark an
-    order FAILED while a driver is on the way to it.
+    order FAILED while a driver is delivering it.
     """
     order = _an_order()
     driver_id = uuid4()

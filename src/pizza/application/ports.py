@@ -1,13 +1,9 @@
-"""What the core asks of the outside world (3.4), and the transaction boundary (3.5).
+"""What the core asks of the outside world, and the transaction boundary.
 
-`Protocol`s, not base classes: an adapter satisfies one by shape, so `infrastructure/`
-imports this module and nothing here imports `infrastructure/`. That inversion is the
-whole of "dependencies point inward" (3.1) — the runtime call goes outward, the import
-does not.
+Protocols rather than base classes: an adapter satisfies one by shape, so this module
+imports nothing from infrastructure/ while infrastructure/ imports it.
 
-Each port error sits immediately above the port that raises it. `domain/errors.py` holds
-business outcomes, which cross every layer to the client; these travel one layer inward
-and stop.
+Each port error sits above the port that raises it.
 """
 
 from datetime import datetime
@@ -21,7 +17,7 @@ from pizza.domain.order import Order
 
 class Clock(Protocol):
     def now(self) -> datetime:
-        """Timezone-aware UTC (4.8). A port, so a test can control it."""
+        """Timezone-aware UTC."""
         ...
 
 
@@ -33,7 +29,7 @@ class OrderRepository(Protocol):
     def save(self, order: Order) -> None: ...
 
     def list_all(self) -> list[Order]:
-        """Every order, newest first (6.6). No cap, no paging, no filter."""
+        """Every order, newest first."""
         ...
 
 
@@ -47,53 +43,46 @@ class DriverRepository(Protocol):
     def claim_next_available_driver(self) -> Driver | None:
         """Lock and return the earliest-registered available driver, or None.
 
-        The ordering is a **convention, not a business rule** (3.2). R7 asks for *an*
-        available driver and names no preference, so 5.4 chose oldest-first purely as a
-        deterministic tie-breaker — there is nothing here that could be violated. It
-        lives in the adapter because selecting in Python and then locking is a
-        read-then-lock race, so the selection and the lock must be one statement (8.9).
+        The ordering is a convention rather than a business rule: any available driver
+        satisfies the requirement, and oldest-first is chosen so that a test can assert
+        which one was claimed. A preference expressing business intent would be a rule,
+        and would move into domain/ with a criteria argument added here.
 
-        If a preference ever expresses business intent — proximity, load — it becomes a
-        rule, moves into `domain/`, and this signature grows a criteria argument. Not
-        before: a criteria type with no fields is a speculative abstraction.
-
-        The returned driver is **locked and not yet marked**. The use case marks and
-        saves it inside the same transaction (8.9, 4.3).
+        The driver comes back locked and not yet marked busy. The caller marks and saves
+        it inside the same transaction.
         """
         ...
 
 
 class OutboxWriteFailed(Exception):
-    """The outbox row could not be written or updated (3.4)."""
+    """The outbox row could not be written or updated."""
 
 
 class OutboxStore(Protocol):
     def add(self, event: OrderReadyEvent) -> None:
-        """Record the event in the transaction that caused it (7.5)."""
+        """Record the event in the transaction that caused it."""
         ...
 
     def mark_published(self, event_id: UUID, now: datetime) -> None:
-        """Raises OutboxWriteFailed. Runs after the commit, so in a second transaction."""
+        """Raises OutboxWriteFailed."""
         ...
 
 
 class PublishFailed(Exception):
-    """The event did not reach the broker (3.4). Not a violated rule — 7.6 returns 200."""
+    """The event did not reach the broker."""
 
 
 class EventPublisher(Protocol):
     def publish(self, event: OrderReadyEvent) -> None:
-        """Raises PublishFailed. Confirms make failure detectable (7.5)."""
+        """Raises PublishFailed."""
         ...
 
 
 class UnitOfWork(Protocol):
-    """One transaction, holding the repositories bound to it (3.5).
+    """One transaction, holding the repositories bound to it.
 
-    The repositories are reached through the unit of work rather than injected beside it,
-    so atomicity is the type's job instead of the composition root's. Leaving the block
-    without `commit()` rolls back. It must be **re-enterable**: 7.5 marks the outbox row
-    after the commit, in a second transaction, and each entry opens a fresh session.
+    Leaving the block without commit() rolls back. It is re-enterable: the outbox row is
+    marked published after the commit, in a second transaction.
     """
 
     orders: OrderRepository

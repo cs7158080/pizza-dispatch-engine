@@ -1,8 +1,6 @@
-"""The order: its fields (4.1), its lifecycle (5.1), and what a transition reports back.
+"""The order: its fields, its status lifecycle, and what a transition reports back.
 
-Layer 1 of 3.1 — standard library only. Nothing here knows that an order is stored,
-published or served: identity and time arrive as arguments (4.7, 4.8), and the two facts
-an adapter needs after a transition leave as a returned value rather than as a call.
+Identity and time arrive as arguments; the entity reaches for neither.
 """
 
 from dataclasses import dataclass
@@ -28,8 +26,8 @@ class AssignmentState(Enum):
     FAILED = "FAILED"
 
 
-# 5.1's whole graph. Terminality is a missing key rather than a separate rule, and the
-# same lookup rejects skipping, reversing and re-sending the current status (4.9).
+# The whole legal graph: only the adjacent status is reachable, and DELIVERED is
+# terminal because it has no entry.
 _NEXT = {
     OrderStatus.RECEIVED: OrderStatus.PREPARING,
     OrderStatus.PREPARING: OrderStatus.BAKING,
@@ -40,10 +38,10 @@ _NEXT = {
 
 @dataclass(frozen=True)
 class TransitionResult:
-    """What the caller must do next, decided here so no adapter decides it."""
+    """What the caller must do after a successful transition."""
 
-    must_publish: bool  # 5.3
-    releases_driver: bool  # 5.6
+    must_publish: bool
+    releases_driver: bool
 
 
 @dataclass
@@ -67,7 +65,7 @@ class Order:
         items: list[str],
         now: datetime,
     ) -> "Order":
-        """The only place R1's initial status and 4.4's initial state are written."""
+        """Build a fresh order. The generated constructor rebuilds a stored one."""
         return cls(
             id=id,
             customer_name=customer_name,
@@ -81,10 +79,11 @@ class Order:
         )
 
     def advance_to(self, requested_status: OrderStatus) -> TransitionResult:
-        """Move one step forward, or refuse (5.1, 5.2)."""
+        """Move one step forward, or raise IllegalTransition."""
         if _NEXT.get(self.status) is not requested_status:
             raise IllegalTransition(self.status, requested_status)
         self.status = requested_status
+        # FAILED records that dispatch gave up and is not overwritten by delivery.
         if (
             self.status is OrderStatus.DELIVERED
             and self.assignment_state is not AssignmentState.FAILED
@@ -96,17 +95,17 @@ class Order:
         )
 
     def can_be_assigned(self) -> bool:
-        """5.5: no driver yet, and not delivered. Both clauses are load-bearing."""
+        """No driver yet, and not delivered."""
         return self.driver_id is None and self.status is not OrderStatus.DELIVERED
 
     def assign_to(self, driver_id: UUID, now: datetime) -> None:
-        """Write 4.4's triple together. The caller asks can_be_assigned() first (8.1)."""
+        """Record the assignment. The caller asks can_be_assigned() first."""
         self.driver_id = driver_id
         self.assignment_state = AssignmentState.ASSIGNED
         self.assigned_at = now
 
     def mark_dispatch_failed(self) -> None:
-        """8.3's terminal record, ignored once the order moved on (4.9)."""
+        """Record that no driver was found. Ignored once the order has moved on."""
         if not self.can_be_assigned():
             return
         self.assignment_state = AssignmentState.FAILED

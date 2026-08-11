@@ -1,8 +1,7 @@
-"""Typed business errors (5.2): outcomes the rules refuse, not process faults.
+"""Business errors: outcomes the rules refuse.
 
-`entrypoints/api/errors.py` maps each to a status code as one registered handler (3.1);
-nothing here knows a code. Errors describing a failed port live beside that port in
-`application/ports.py` instead — an unreachable broker is not a violated rule.
+The API maps each to a status code; nothing here knows a code. Errors describing a failed
+port live beside that port, in `application/ports.py`.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class IllegalTransition(Exception):
-    """5.1's graph refused the move. The API maps this to 409 (5.2)."""
+    """The requested status does not follow the current one."""
 
     def __init__(
         self, current_status: OrderStatus, requested_status: OrderStatus
@@ -28,7 +27,7 @@ class IllegalTransition(Exception):
 
 
 class OrderNotFound(Exception):
-    """No order carries this identifier. The API maps this to 404."""
+    """No order carries this identifier."""
 
     def __init__(self, order_id: UUID) -> None:
         super().__init__(f"no order with id {order_id}")
