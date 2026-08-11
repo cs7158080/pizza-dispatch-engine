@@ -23,7 +23,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
-| 7 — Broker contract | 7.1, 7.2, 7.5, 7.6 | 7.3, 7.4, 7.7 |
+| 7 — Broker contract | 7.1, 7.2, 7.3, 7.5, 7.6 | 7.4, 7.7 |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | — | 10.1–10.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **72** | **38** |
+| **Total** | **73** | **37** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1702,6 +1702,52 @@ and Part 4 of `03-roadmap.md`).
   dispatch, which is the fact the repair needs.
   *Source:* R5, R6, R17, `CLAUDE.md` §3. *Constrained by:* 3.4, 3.8, 4.7, 4.8, 5.5, 7.5.
   *Constrains:* 7.3. *Deferred to:* FW14, FW15. *Realised in:* U3 (the type), U6 (the wire).
+
+- **7.3 Serialization and version marker.** `[decided]`
+  *Decision:* **JSON encoded UTF-8**, `content_type="application/json"`, produced by two pure
+  functions in `infrastructure/broker/serialization.py` (3.1; 3.4 kept the format here when it
+  moved the type to `application/`):
+
+  ```python
+  class SerializationError(Exception): ...
+
+  def serialize(event: OrderReadyEvent) -> bytes: ...
+  def deserialize(raw: bytes) -> OrderReadyEvent: ...   # SerializationError on any invalid input
+  ```
+
+  The module imports **stdlib only** — not `pika` — which is what lets the database adapter import
+  it for the outbox row: the dependency is on a format, not on a broker. `UUID` is the canonical
+  hyphenated string and `datetime` is ISO 8601 with an explicit offset, both already fixed by 4.7
+  and 4.8.
+
+  *The same function produces both copies*, the wire message and the stored `payload`. That is the
+  whole point of the outbox row: it is evidence of what was meant to go out, and two functions
+  producing approximately the same thing would make it a guess. The database adapter writes
+  `serialize(event).decode("utf-8")` — a decode that cannot fail on bytes we produced.
+  *Both signatures take and return `bytes`, deliberately.* UTF-8 decoding belongs inside the
+  boundary: with a `str` parameter, malformed bytes raise `UnicodeDecodeError` before
+  `deserialize` is entered, and 8.4's poison-message path would have to catch two families of
+  error instead of one. The module owns the entire conversion from untrusted bytes to a valid
+  event.
+  *No version field.* A version buys one capability — letting one side change while the other is
+  still old. Both services are built from one repository and started by one `docker compose up`,
+  so there is no rolling deploy and no second consumer, and no moment at which the versions can
+  differ. **The tolerant reader is the other half of the same decision:** unknown fields are
+  ignored, required fields missing or invalid raise. That is what makes a later field addition
+  safe without coordination, and it is why a marker is only needed the day a field **changes
+  meaning or disappears** — the condition that reopens this item.
+  *Rejected:* **a binary format** (Protobuf, Avro) — buys size and speed that have no consumer
+  here, and pays in an external schema and a build step. **The database adapter building its own
+  JSON** — two formats that drift. **`OutboxStore.add` taking pre-serialized bytes** — pushes a
+  wire format into the application layer; 3.4 fixed `add(event)`.
+  *Left to 8.4:* what happens to the malformed message itself — discarded, parked, or blocking.
+  7.3 fixes only that the deserializer raises rather than returning something partial.
+  *Recommendation carried to 4.5, which owns the column:* store `payload` as `jsonb`. The one
+  question ever asked of the table is which orders lost their dispatch, and `jsonb` makes it a
+  single query; the byte-exactness `text` preserves has no consumer, since FW2's relay rebuilds
+  the message from the content and whitespace is not the content.
+  *Source:* R5, R6. *Constrained by:* 3.1, 3.4, 4.7, 4.8, 7.2. *Constrains:* 7.7, 8.4.
+  *Recommends to:* 4.5. *Realised in:* U6.
 
 - **7.5 Publish versus commit ordering.** `[decided]`
   *Decision:* three parts.

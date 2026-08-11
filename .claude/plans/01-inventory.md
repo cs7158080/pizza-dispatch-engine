@@ -217,7 +217,9 @@ gaps surfaced.*
   *Why now:* these are the last line of defence for the concurrency race (F2) and must be in the schema from the first migration.
   *Source:* R8, DoD "Broker & Consumer". *Constrained by 4.4* — "one active assignment per
   driver" is already expressible in the schema; what remains open is the rest of the
-  constraint set.
+  constraint set. *Recommendation from 7.3* — the outbox `payload` column as `jsonb` rather than
+  `text`: the table is only ever asked which orders lost their dispatch, and byte-exactness has
+  no consumer.
 
 - **4.6 Schema creation strategy.**
   *Decide:* migration tool, framework auto-create at startup, or init script — and how it behaves when a container starts before the database is ready.
