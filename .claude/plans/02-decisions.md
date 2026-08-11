@@ -2599,12 +2599,17 @@ and Part 4 of `03-roadmap.md`).
   | From | "runs" means |
   |---|---|
   | U1 | `ruff format --check .` · `ruff check .` · `mypy src tests` · `python -c "import pizza"` |
-  | U4 | + `pytest tests/unit` |
+  | U2 | + `pytest tests/unit` |
   | U9 | + `docker compose up` reaches 11.3's PASS summary and the test service exits zero |
   | U11 | + the same with the full integration suite |
 
   `python -c "import pizza"` is not filler: 3.3 chose src-layout so an import resolves only
   through the install, so its failure means the package is not installed.
+  *The `pytest` row moved from U4 to U2 on 2026-08-11.* U4 is the unit that fills
+  `tests/unit/`, but U2 gets there first: 10.2's loader is pure logic with no infrastructure, so
+  §5 admits its tests as free, and §8.2 requires every step's behaviour to be verified by a test
+  that would fail if it broke. Recorded here rather than as a reading inside U2's plan, because a
+  Phase 3 document may fill a silence this file left but may not amend one of its rows.
   Each Phase 3 document states its own list, and it applies **per step commit** — so `main`
   satisfies §8.6 after a merge by construction.
   *Rejected:* treating it as vacuous until U9 — §8.6 would be ceremony for eight units, and
