@@ -871,9 +871,11 @@ and Part 4 of `03-roadmap.md`).
       def save(self, driver: Driver) -> None: ...
       def claim_next_available_driver(self) -> Driver | None: ...   # 8.9 locks, 5.4 orders
 
+  class OutboxWriteFailed(Exception): ...
+
   class OutboxStore(Protocol):
       def add(self, event: OrderReadyEvent) -> None: ...
-      def mark_published(self, event_id: UUID, now: datetime) -> None: ...
+      def mark_published(self, event_id: UUID, now: datetime) -> None: ...   # raises it
 
   class PublishFailed(Exception): ...
 
@@ -904,6 +906,23 @@ and Part 4 of `03-roadmap.md`).
   event is marked published. `PublishFailed` sits beside its port, not in `domain/errors.py` —
   an unreachable broker is not a violated rule. The use case catches it, not the router, since
   7.6 returns `200` either way.
+
+  *`OutboxWriteFailed`, added 2026-08-11 — the same reason, and the pattern was already in this
+  item.* The line below fixes that a failed `mark_published` is "logged, not raised" and leaves
+  its **type** unnamed, which leaves the use case with `except Exception`. That is the broad
+  swallowing `CLAUDE.md` §6 rejects, and here it is worse than untidy: a bug of ours lands in the
+  same net and leaves a row asserting the event was lost when it was published, so the record 7.5
+  built precisely to be trusted would lie. A narrower catch is unavailable in `application/` by
+  construction — the exception actually raised belongs to a database library 3.1 forbids this
+  layer to import — so the type is declared here and U5's adapter translates into it, exactly as
+  U6's does for `PublishFailed`. Found while writing U3's plan.
+  *The placement rule the two now share, stated so it is not read as habit:* an error naming a
+  **port's** failure lives beside that port. `domain/errors.py` holds business outcomes, which
+  cross every layer to the client and are enumerated by one registered handler (5.2, 3.1); a port
+  error travels one layer inward and stops, and each has exactly one call site that catches it by
+  name. **The condition that would change it:** an application-layer error caught in more than one
+  place, or something needing to enumerate them, earns `application/errors.py`. Neither holds
+  today, and a file grouping two unrelated exceptions for tidiness would have no reader.
 
   *One line each:* 7.5 publishes after the commit, so `mark_published` runs in a second
   transaction and **the `UnitOfWork` must be re-enterable**, each `__enter__` opening a fresh
