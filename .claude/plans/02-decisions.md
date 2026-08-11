@@ -595,16 +595,17 @@ and Part 4 of `03-roadmap.md`).
   *Two conditional lines, and why they are approved now rather than later.* Two open items can each
   require a library, and neither is in U1:
 
-  | Conditional | Decided by | Unit | If decided otherwise |
+  | Conditional | Decided by | Unit | Outcome |
   |---|---|---|---|
-  | `pydantic-settings` | 10.2 — a typed settings object or raw environment reads | U2 | `os.environ` with a hand-written dataclass — the line is dropped |
-  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | neither alternative needs a dependency — the line is dropped |
+  | `pydantic-settings` | 10.2 — a typed settings object or raw environment reads | U2 | **dropped.** 10.2 chose `pydantic` alone, so no dependency is added and neither lock file changes |
+  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | still open; neither alternative needs a dependency, and the line is dropped if either is chosen |
 
   They enter `pyproject.toml` in the same commit as the decision that requires them, and
   `uv pip compile` is re-run. **"Not incremental" governs the act of approval, not the file being
   frozen** — what it forbids is a fresh approval round mid-unit, which conditioning them now
   prevents. Withholding them until 10.2 and 4.6 close would leave this item open and U1 blocked on
-  it. (`pydantic-settings` carries `.env` loading, so there is no separate `python-dotenv`.)
+  it. There is no separate `python-dotenv` either: 10.3 has the application parse no `.env` file at
+  all, and Compose reads it for interpolation only.
 
   *Not on the list, and each has an owner:* `uv` — a local tool, not a dependency (2.9);
   `pip-tools` — dropped with the generator (2.9); `pre-commit` — 2.8; `pytest-asyncio`, `aio-pika`,
@@ -616,7 +617,8 @@ and Part 4 of `03-roadmap.md`).
   *Carried forward to 11.9:* `psycopg[binary]` has no musl wheel, so an Alpine base breaks this
   list. 2.5 recorded it; it is repeated here because the list is where it will be read.
   *Source:* `CLAUDE.md` §6. *Constrained by:* 2.3, 2.5, 2.6, 2.7, 2.8, 2.9, 3.6, 3.7, 12.3.
-  *Constrains:* 11.9. *Conditional on:* 4.6, 10.2. *Realised in:* U1.
+  *Constrains:* 11.9. *Conditional on:* 4.6 — 10.2 closed its line by declining it.
+  *Realised in:* U1.
 
 
 ## Topic 3 — Architecture and layering
