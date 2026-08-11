@@ -2529,11 +2529,32 @@ and Part 4 of `03-roadmap.md`).
   *Planning commits.* Phase 1 and the decisions taken before the split landed through one pull
   request from `plan/project-planning`. **Phase 2 and Phase 3 then part company, because they run
   on different clocks.** A unit's remaining Phase 2 items are settled on a short `plan/u<N>-gate`
-  branch and merged to `main` promptly, so parallel sessions and later units see them. Its Phase 3
-  document is the **first commit on the unit's own branch**, followed by the step commits, so one
-  pull request carries the plan and the implementation it produced, and a mid-flight replan
-  (§2 Phase 4) lands in the same place. **No unit lacks a pull request; only commits inside units
-  do.**
+  branch of its own. Its Phase 3 document is the **first commit on the unit's own branch**,
+  followed by the step commits, so one pull request carries the plan and the implementation it
+  produced, and a mid-flight replan (§2 Phase 4) lands in the same place. **No unit lacks a pull
+  request; only commits inside units do.**
+
+  *When a gate branch merges — writing and merging are separate acts, and this record conflated
+  them until 2026-08-11.* The branch is **written** whenever a session is free, which is what
+  makes parallel planning possible at all. It is **merged when its contract is first needed**:
+  before the earliest unit that must know it, which is not necessarily the unit it is named after.
+  *Why not "promptly", which this record said before:* prompt merging buys visibility between
+  parallel sessions and nothing else, while planning runs ahead of building — so a gate could land
+  on `main` up to five units before the unit it opens. `main` would stop reading as "decide, then
+  build", in a history that is itself a graded deliverable a reviewer reads (R21, 14.5). Ordering
+  merges by need restores that reading at no cost to parallelism: the work still happens whenever
+  a session is free, and only the merge point is chosen rather than falling out of when a session
+  happened to run.
+  *The accepted cost:* a waiting gate branch is invisible to anyone who does not know to look for
+  it. The merge point is therefore weighed at each unit rather than obeyed, and a session opening
+  a unit whose gate is unmerged has to be told the branch exists — U1 §8 already had to say
+  exactly that about `plan/u6-gate`.
+
+  *The status table's `Total` cell is recounted at merge time and never carried from a branch.* It
+  is computed against the merged file with `grep -c '\[decided\]'`, verified to equal the cell.
+  Every gate branch increments that one cell, which makes it the only certain conflict in parallel
+  work, and a count taken on a branch is stale by definition the moment another gate merges first.
+  This has already produced one wrong count in the record.
   *Rejected:* **local `--no-ff` merges** — identical `main`, and the deviation §4 pre-emptively
   named. **A pull request per step** — forty to sixty. **A separate pull request for a unit's
   planning, before its implementation** — the closest reading of §2 Phase 4, and it buys no real
