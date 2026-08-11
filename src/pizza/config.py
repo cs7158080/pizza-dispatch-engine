@@ -1,8 +1,7 @@
 """The configuration boundary: environment strings turned into typed settings.
 
-10.1 registers the variables; 10.2 fixes this module's shape and placement. No module
-under domain/ or application/ imports it, and nothing here reads the environment at
-import time — loading is a call, made once by a composition root.
+Nothing here reads the environment at import time. Loading is a call, made once by a
+composition root, so importing this module can never fail on a missing variable.
 """
 
 from collections.abc import Mapping
@@ -20,7 +19,7 @@ class ConfigurationError(Exception):
 
 
 class ServiceSettings(BaseModel):
-    """Read by the api and the worker (10.1)."""
+    """Read by the api and the worker."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -33,7 +32,7 @@ class ServiceSettings(BaseModel):
 
 
 class ClientSettings(BaseModel):
-    """Read by the CLI and the integration suite (10.1)."""
+    """Read by the CLI and the integration suite."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
