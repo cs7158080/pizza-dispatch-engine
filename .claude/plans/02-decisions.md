@@ -20,7 +20,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1–2.10 | — |
 | 3 — Architecture and layering | 3.1–3.8 | — |
-| 4 — Data model | 4.1–4.5, 4.7, 4.8, 4.9 | 4.6 |
+| 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
 | 7 — Broker contract | 7.1–7.7 | — |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **81** | **29** |
+| **Total** | **82** | **28** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -618,7 +618,7 @@ and Part 4 of `03-roadmap.md`).
   | Conditional | Decided by | Unit | Outcome |
   |---|---|---|---|
   | `pydantic-settings` | 10.2 — a typed settings object or raw environment reads | U2 | **dropped.** 10.2 chose `pydantic` alone, so no dependency is added and neither lock file changes |
-  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | still open; neither alternative needs a dependency, and the line is dropped if either is chosen |
+  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | **dropped.** 4.6 chose `create_all` from a one-shot service, so no dependency is added and neither lock file changes |
 
   They enter `pyproject.toml` in the same commit as the decision that requires them, and
   `uv pip compile` is re-run. **"Not incremental" governs the act of approval, not the file being
@@ -637,7 +637,7 @@ and Part 4 of `03-roadmap.md`).
   *Carried forward to 11.9:* `psycopg[binary]` has no musl wheel, so an Alpine base breaks this
   list. 2.5 recorded it; it is repeated here because the list is where it will be read.
   *Source:* `CLAUDE.md` §6. *Constrained by:* 2.3, 2.5, 2.6, 2.7, 2.8, 2.9, 3.6, 3.7, 12.3.
-  *Constrains:* 11.9. *Conditional on:* 4.6 — 10.2 closed its line by declining it.
+  *Constrains:* 11.9. *Both conditional lines are now closed, each by declining:* 10.2 and 4.6.
   *Realised in:* U1.
 
 
@@ -662,14 +662,15 @@ and Part 4 of `03-roadmap.md`).
   │                            register_driver · dispatch_order — one file each
   │
   ├── infrastructure/       # layer 3, driven — imports: application, domain, libraries
-  │   ├── db/                  models, repositories, unit of work, outbox, migrations
+  │   ├── db/                  models, repositories, unit of work, outbox, schema creation (4.6)
   │   ├── broker/              publisher, topology declaration
   │   └── clock.py             SystemClock
   │
   └── entrypoints/          # layer 3, driving — imports: application; wires only at main.py
       ├── api/                 main · deps · schemas · errors · routers/{orders,drivers,health}
       ├── worker/              main · consumer
-      └── cli/                 3.6
+      ├── cli/                 3.6
+      └── schema/              main — the one-shot schema creator (4.6)
   ```
 
   *The rule, written so it can be checked in a diff:* **no module under `domain/` or
@@ -1293,6 +1294,100 @@ and Part 4 of `03-roadmap.md`).
   a last line of defence behind 8.9's row lock; it is expected never to fire.
   *Source:* R8, DoD "Broker & Consumer". *Constrained by:* 4.1–4.4, 4.7–4.9, 5.1, 5.8, 7.2, 7.5,
   8.9. *Accepts the recommendation of:* 7.3. *Realised in:* U5.
+
+- **4.6 Schema creation strategy.** `[decided]`
+  *Decision:* **`Base.metadata.create_all()`, run once by a one-shot Compose service, before any
+  other service starts.** No migration tool and no dependency.
+
+  ```
+  postgres                                    healthcheck is 11.2's
+      ↓  condition: service_healthy
+  schema        entrypoints/schema/main.py — builds the Engine, calls
+                infrastructure/db/schema.py:create_schema(engine), exits 0
+      ↓  condition: service_completed_successfully
+  api · worker · tests
+  ```
+
+  The service runs the `runtime` image with a different `command` — **no new image and no new
+  stage**, which is the arrangement 3.7 already recorded for FW2's relay. 11.1's service list
+  already reserves the slot ("any init/migration service"); this item fills it and fixes the
+  contract, while **11.1 wires it and 11.2 owns the healthcheck it waits on**.
+
+  *Verified before choosing, because otherwise the choice is forced rather than made:* every
+  constraint 4.5 decided is expressible in SQLAlchemy metadata — the partial unique index through
+  `postgresql_where`, the row-level `CHECK`, `jsonb`, `timestamptz`, the foreign key. Had one
+  required hand-written DDL, `create_all` would have been unavailable and this record would read
+  differently.
+
+  *Why a service of its own, and the race it removes is not hypothetical.* `create_all` inspects
+  the catalogue and then issues plain `CREATE TABLE` for what it did not find. Two processes that
+  both inspect before either creates therefore both proceed, and the loser gets "relation already
+  exists" — so running it from the api and the worker, which Compose starts together, is a genuine
+  race rather than a tidiness argument. **Stated at its real size:** the window is small and the
+  failure intermittent, which makes it worse than a deterministic one, not better — it would pass
+  every time it was tried here and fail on the reviewer's machine, inside the single command R15
+  is graded on.
+  *Why not "the api creates it and the worker waits":* 3.8 made them peers over one core. A
+  `worker → api` dependency is a hierarchy with no other reason to exist, and it would read as an
+  architectural claim rather than as a way around a race.
+
+  *What this also answers, which is half the item:* the inventory asks how a container behaves when
+  it starts before the database is ready. It does not start. If PostgreSQL is not healthy the
+  one-shot does not run; if schema creation fails, nothing downstream starts and the failure is one
+  service's non-zero exit rather than three services emitting connection errors at once, which is
+  the form that hides its own cause. **No step waits on a duration** — `CLAUDE.md` §5 forbids it,
+  and every edge above is a condition.
+
+  *Why not Alembic — and the argument is not 1.1's ceiling test.* That test governs delivered scope,
+  and applying it to build machinery is a mistake this record already made once and withdrew
+  (`docs/ai-log.md`, 2026-08-10). Alembic is neither scope nor hygiene: it is the operational
+  ability to change a schema that holds data which must survive the change. **11.7 removed the
+  object of that ability** — with no named volumes the schema is created from empty on every launch,
+  so there is never a second version and `versions/` would hold exactly one revision describing a
+  capability nothing uses. It also does not solve the ordering problem: `alembic upgrade head` needs
+  the same one-shot service from the same place, so the topology above is what either choice buys.
+  *What is given up, and it is not nothing:* a reviewer of a backend assignment may expect
+  migrations, and their absence can read as a shortcut rather than a decision. The README states it
+  as a trade-off with the condition that reverses it, and the reversal is cheap — `Base.metadata` is
+  already the single source, so `alembic revision --autogenerate` produces the first revision from
+  it (2.5). **FW16** holds the entry and the chain of preconditions behind it.
+
+  *Why not an init script in the image's `docker-entrypoint-initdb.d`.* It is the strongest
+  alternative on the axis this item is about: PostgreSQL runs it before it accepts external
+  connections, so there is no race, no extra service, and no ordering to design at all. It is
+  rejected on a different axis — the schema would be hand-written SQL beside the models that already
+  describe it, and **nothing would ever compare them**. 12.3 gives the suite no database client, so
+  the drift has no detector even in principle; and the script works only inside Compose, so a schema
+  created any other way is created by different code. One source of truth is worth more here than
+  the ordering it would have simplified.
+
+  *`entrypoints/schema/` is an entrypoint by the composition-root rule rather than by the
+  definition of a driving adapter,* and the record says so rather than blurring it: it drives no use
+  case and touches no `application/` module. It sits there because it must import `infrastructure/`
+  and 3.1 permits that in `main.py` files only.
+
+  *Two behaviours that follow, both worth writing so U5 does not choose:* `create_all` skips a table
+  it finds, so a second `up` after `Ctrl-C` — where the container keeps its filesystem (11.7) — is a
+  no-op rather than an error. **By the same mechanism it does not repair a partially created
+  schema**, which is safe only because 11.7 guarantees the two states are empty or complete.
+  And api, worker and tests do **not** check the schema for themselves:
+  `service_completed_successfully` is a hard guarantee, and a second check is one rule in two places.
+
+  *Rejected:* **Alembic** — above. **An init script** — above. **`create_all` in each service's
+  composition root** — the race. **`create_all` in the api alone** — the hierarchy. **The command
+  inline in `docker-compose.yml` as a `python -c`** — code in YAML, reachable by no test and by no
+  type checker.
+  *Corrects two texts that presupposed migrations:* 3.1's tree, where `db/` read "…, outbox,
+  migrations" and gains the fourth entrypoint; and Part 4's U5 row in `03-roadmap.md`, which read
+  "Schema and migrations". Both are narrowed in this change, as 4.7 narrowed 3.1's `ids.py` slot.
+  The inventory's own wording at 4.5 is left alone — a question is not rewritten once its answer is
+  known.
+  *Closes 2.10's second conditional line:* `alembic` is dropped exactly as that item provides for,
+  and neither lock file changes.
+  *Revisit if:* the environment stops being disposable. That is A19, and it reopens only through
+  FW13 — which is the chain **FW16** records.
+  *Source:* R14, R15. *Constrained by:* 2.5, 3.1, 3.7, 3.8, 4.5, 11.1, 11.2, 11.7, 12.3.
+  *Constrains:* 11.1. *Closes:* 2.10's conditional. *Deferred to:* FW16. *Realised in:* U5.
 
 - **4.7 Identifier scheme.** `[decided]`
   *Decision:* **UUID version 4, generated in the application layer and passed into the entity as
