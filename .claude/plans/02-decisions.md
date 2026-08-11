@@ -22,7 +22,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 3 — Architecture and layering | 3.1–3.8 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
-| 6 — API contract | 6.1–6.8 | 6.9 |
+| 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **86** | **24** |
+| **Total** | **87** | **23** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -875,6 +875,7 @@ and Part 4 of `03-roadmap.md`).
   class OrderRepository(Protocol):
       def add(self, order: Order) -> None: ...       # returns nothing — 4.7
       def get(self, order_id: UUID) -> Order | None: ...
+      def get_for_update(self, order_id: UUID) -> Order | None: ...   # 6.9 — write paths only
       def save(self, order: Order) -> None: ...
       def list_all(self) -> list[Order]: ...         # newest first; docstring carries it
 
@@ -947,8 +948,11 @@ and Part 4 of `03-roadmap.md`).
   and saves in the same transaction (8.9). **No lifecycle on `EventPublisher`** — the composition
   root holds the concrete adapter (3.1) — which *constrains* 7.7 rather than waiting on it.
 
+  *Amended by 6.9 on 2026-08-11:* `OrderRepository` gains `get_for_update`, taking a row lock for the
+  status-update path. It is a second method rather than a flag on `get`, so that the read paths above
+  cannot acquire a lock by accident.
   *Source:* `CLAUDE.md` §3 ("explicit typed boundaries"), §2 Phase 3. *Constrained by:* 2.4, 2.5,
-  3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
+  3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 6.9, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
   2.5's "a port of its own", 4.7's sample line. *Realised in:* U3.
 
 - **3.5 Transaction ownership.** `[decided]`
@@ -2080,6 +2084,78 @@ and Part 4 of `03-roadmap.md`).
   *Source:* `CLAUDE.md` §7. *Answers:* Q15. *Deferred to:* FW9.
 
 
+- **6.9 Concurrent `PATCH` behaviour.** `[decided]`
+  *Decision:* the write path reads the order with **`SELECT … FOR UPDATE`**. The second request
+  blocks, re-reads the committed status, and `advance_to` refuses it — **`409`**, through 5.2's
+  existing mapping. Read paths are untouched and take no lock.
+
+  *The scenario is real, not hypothetical.* 2.4 chose a synchronous runtime, and FastAPI serves `def`
+  handlers from a thread pool, so two simultaneous requests genuinely run in parallel, each in its
+  own transaction (3.5). Under PostgreSQL's default `READ COMMITTED`:
+
+  | | T1 | T2 |
+  |---|---|---|
+  | 1 | reads `PREPARING` | |
+  | 2 | | reads `PREPARING` |
+  | 3 | `advance_to(BAKING)` passes | |
+  | 4 | | `advance_to(BAKING)` passes — in memory, on a stale copy |
+  | 5 | `UPDATE`, commit | |
+  | 6 | | `UPDATE` (blocked until 5, then rewrites `BAKING`), commit |
+
+  Both return `200` and **two `ORDER_READY` events are published**, where serial execution yields
+  `200` then `409`.
+
+  *Stated precisely, the end state is not corrupted.* 5.1 makes transitions linear and single-step,
+  so two concurrent updates on one order can only ever request the **same** next status — anything
+  else fails in memory regardless of timing. The anomaly is a **duplicated side effect, not a wrong
+  state**, and it lands on the one path 5.5 already made idempotent by design (A2).
+
+  *The one interleaving that does corrupt state, and it is why this item is not "accept it".* The
+  transition into `DELIVERED` also releases the driver (5.6). Two concurrent `DELIVERED` requests on
+  one order, with a worker claim landing between them: T1 releases driver D → the worker claims D
+  for order Y and marks it `BUSY` → T2, holding the older read, writes `AVAILABLE`. D is now
+  assigned to Y and advertised as free, so it can be dispatched twice — the rule A13 states.
+  **4.5's uniqueness constraint does not catch it:** the damage is in `drivers.status`, the
+  denormalised copy 4.3 already recorded as unprotectable, since PostgreSQL has no cross-table
+  `CHECK`. It is the ghost driver of 4.3 with the sign reversed.
+
+  *Why this option and not another — the property that makes it cheap.* The answer to "what happens
+  on a concurrent `PATCH`" becomes **"exactly what happens on a sequential one"**. No new status
+  code, no new row in 6.2's table, no new message for the CLI to render (6.3), no new code path. The
+  cost is **one method on the port** — `get_for_update` beside `get` in `OrderRepository` (3.4) —
+  used by the write path only, while `queries.py` and 6.5's two keyed reads keep `get`. It
+  introduces no new concept: 8.9 already brought `FOR UPDATE SKIP LOCKED` into the system, and 3.4
+  already carries one locking method.
+
+  *Rejected — **accepting the anomaly***. The argument for it is genuine: no delivered consumer
+  produces concurrent `PATCH`es — the CLI is one interactive user (9.2), and 12.3's scenario table
+  races **drivers** (F2), not statuses — so under 1.1's ceiling test the protection is not built. It
+  is rejected because **8.9 already refused this exact argument in this exact system**, that safety
+  must not rest on a deployment accident, and because the driver-release window above breaks a
+  stated rule rather than merely duplicating a harmless event.
+  *Rejected — **optimistic locking with a `version` column***. It adds a column to the schema, a
+  `version_id_col` configuration, and a fresh decision about what the API returns on a version
+  conflict. It buys throughput under contention this system does not have. **It would also have
+  moved this branch's merge ahead of U5**, since the column is 4.5's subject.
+  *Rejected — **a `CHECK` constraint***. It cannot compare against the previous value; expressing
+  the rule needs a trigger, which 4.3 already declined for the same reason.
+
+  *Nothing is handed to 4.5.* `SELECT … FOR UPDATE` is runtime behaviour — no column, no index, no
+  constraint — so U5's open items are unaffected and this branch merges on the ordinary schedule.
+
+  *One constraint handed to U8, recorded rather than assumed.* There is a lock-ordering question
+  here: the API locks an order and may then touch a driver, while the worker locks a driver and then
+  updates an order — an inversion, which is the standard shape of a deadlock. It does not bite,
+  because an order cannot simultaneously be assigned (the API releasing) and unassigned (the worker
+  dispatching). **That rests on `dispatch_order` reading the order before claiming a driver**, which
+  no item has fixed. 8.9 now carries the pointer.
+
+  *Not decided here:* whether F14 becomes a test scenario. This item makes it HTTP-observable — one
+  `200`, one `409` — and therefore a candidate; 12.1 chooses, and it is U10's item.
+  *Source:* R2, `CLAUDE.md` §5. *Constrained by:* 2.4, 2.5, 3.5, 4.3, 5.1, 5.2, 5.5, 5.6, 8.9.
+  *Constrains:* 3.4, 8.9. *Defines:* F14. *Realised in:* U7.
+
+
 ## Topic 7 — Broker contract
 
 - **7.1 Topology.** `[decided]`
@@ -2660,7 +2736,12 @@ and Part 4 of `03-roadmap.md`).
   silently the moment anyone scales the worker, including a reviewer running
   `--scale worker=2`; advisory locks — a second locking concept for no gain; an optimistic
   read-then-update retry loop — more code and more failure paths than the database primitive.
-  *Source:* R8, DoD. *Answers:* Q13. *Defines:* F2. *Constrained by A1.*
+  *Lock ordering, handed here by 6.9 on 2026-08-11.* The API locks an order and may then touch a
+  driver; this claim locks a driver and then updates an order — an inversion, and the standard shape
+  of a deadlock. It is unreachable only because an order cannot be assigned and unassigned at once,
+  **which rests on `dispatch_order` reading the order before claiming a driver**. U8 implements that
+  order deliberately; it is not free.
+  *Source:* R8, DoD. *Answers:* Q13. *Defines:* F2. *Constrained by A1.* *Constrained by:* 6.9.
 
 
 ## Topic 9 — CLI
