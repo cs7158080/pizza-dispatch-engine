@@ -432,13 +432,33 @@ and Part 4 of `03-roadmap.md`).
   *Decision:* **`ruff` for formatting and linting, `mypy` in `strict`**, both configured in
   `pyproject.toml`, both run from a local virtual environment before every commit:
   `ruff format .` while working, then `ruff check .` and `mypy src tests`.
-  Ruff's rule set is **its default — `E4`, `E7`, `E9`, `F` — plus `I`** for import order, and
-  nothing else, written as `extend-select = ["I"]`.
-  *Not `select = ["E", "F", "I"]`,* which is the other reading of "the default (`E`, `F`)" and is
-  rejected: spelling `E` in full additionally enables `E501`, and `ruff format` cannot shorten a
-  long string, URL or comment — so `ruff format --check .` and `ruff check .`, two of 14.7's four
-  Definition-of-Done commands, would disagree about the same file. It would also force a
-  `line-length` that this item never chose.
+  Ruff's rule set is **exactly `E4`, `E7`, `E9`, `F` and `I`** for import order, and nothing else,
+  written as `select = ["E4", "E7", "E9", "F", "I"]`.
+  *Named with `select` rather than left to the default, corrected on 2026-08-11.* This item
+  previously read "its default — `E4`, `E7`, `E9`, `F` — plus `I`", written as
+  `extend-select = ["I"]`. **That description is false for the pinned ruff 0.16.2:** its default
+  set contains `UP` among others — counted, 414 rules across 38 families were active, against the
+  61 this item intended — so `extend-select` was enforcing rules nobody chose. It
+  surfaced mid-step in U2, where `UP047` demanded PEP 695 type parameters for a generic function —
+  a rule that fires only because 2.9 pinned `requires-python = ">=3.12"`, which ruff reads as its
+  target version, and which stayed silent through U1 because U1 wrote no generic function. Two
+  decided items met in a place neither had looked at. Naming the five codes makes the set what
+  this item chose, in any ruff version.
+  *What is given up, stated plainly:* whatever the wider default would have caught. The loss is
+  real and it is accepted, because a rule set nobody selected — and that changes with a tool
+  upgrade — cannot sit inside a Definition of Done that must hold at every commit (14.7).
+  *What this frees rather than decides:* `UP047`'s suggestion, 3.12's `def f[T: Base](...)` in
+  place of a `TypeVar`, stays available as a choice instead of a demand. U2 keeps the `TypeVar`
+  form its plan was written with.
+  *Not `extend-select` with an `ignore` list:* it names the rules switched **off**, so every ruff
+  upgrade may add one more that has to be discovered by a failing command and then silenced.
+  `select` names what is on, which is the property that does not decay.
+  *The earlier rejection of `select = ["E", "F", "I"]` stands untouched:* spelling `E` in full
+  additionally enables `E501`, and `ruff format` cannot shorten a long string, URL or comment — so
+  `ruff format --check .` and `ruff check .`, two of 14.7's Definition-of-Done commands, would
+  disagree about the same file, and a `line-length` this item never chose would be forced. `E4`,
+  `E7` and `E9` named individually do not contain `E501`, which is why the corrected form is not
+  that rejected one.
   **Ruff's file scope excludes Markdown**, written as `extend-exclude = ["*.md"]` under
   `[tool.ruff]`. Ruff 0.16 formats fenced `python` blocks inside `.md` files by default, so
   `ruff format --check .` — one of 14.7's four commands — fails on this file's pseudo-code

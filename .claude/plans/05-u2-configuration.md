@@ -48,8 +48,8 @@ Each line names the item that owns it, so nothing here is silence.
 ## 3. Branch, commits, and the merge
 
 - **Branch:** `feat/u2-configuration`, cut from `main` at `68d6353` (14.2).
-- **Commits:** one gate commit, one planning commit, then one commit per step (14.3, 14.4).
-  Four in total.
+- **Commits:** two gate commits, one planning commit, then one commit per step (14.3, 14.4).
+  Five in total.
 - **Merge:** one pull request, squash-merged, its title ending in `(#N)` (14.2, 14.3).
   The branch is not deleted (14.2).
 
@@ -57,14 +57,15 @@ Each line names the item that owns it, so nothing here is silence.
 |---|---|---|
 | A | gate | `docs: merge a Phase 2 gate when its contract is needed, not promptly` |
 | B | planning | `docs: plan the configuration unit` |
+| C | gate | `chore: name ruff's rule set instead of inheriting its default` |
 | 1 | step | `feat: turn the environment into a typed, validated settings boundary` |
 | 2 | step | `chore: catalogue the configuration surface in .env.example` |
 
-**Neither A nor B is a plan step**, and the distinction has a consequence here that it did not
+**None of A, B or C is a plan step**, and the distinction has a consequence here that it did not
 have in U1: 14.4 defines a step as a commit carrying §8's Definition of Done, and §4 below now
-includes `pytest tests/unit`. At A and B no test exists, and `pytest` exits 5 — "no tests
+includes `pytest tests/unit`. At A, B and C no test exists, and `pytest` exits 5 — "no tests
 collected" — rather than 0. The fifth command therefore joins at step 1, the commit that creates
-the first test.
+the first test; the other four hold at all five commits.
 
 *Why A is here at all.* It belongs to neither topic 10 nor U2: it amends 14.3, and it was found
 while reviewing this document. It rides on this branch by the developer's ruling — the same
@@ -79,6 +80,19 @@ consequence:** the amendment reaches `main` only when U2 merges, while `plan/u6-
 `plan/u7-gate` are open in parallel worktrees right now and will choose their merge points under
 the old rule unless they are told. U1 §8 had to record exactly this kind of hand-off, and it is
 recorded here for the same reason.
+
+*Why C exists, and it was forced rather than chosen.* Step 1 could not be committed as written:
+`ruff check .` failed on `UP047`, which asks a generic function to use PEP 695 type parameters.
+The rule is in ruff 0.16.2's **default** set — wider than the four families 2.8 believed the
+default to be — and it fires only because 2.9 pinned `requires-python = ">=3.12"`, which ruff
+reads as its target version. Two decided items met in a place neither had looked at, and §2
+Phase 3 says a judgement call the plan did not make means the plan is incomplete: stop and return
+to Phase 2. So the gap went back to 2.8, which now names its five rule codes with `select`
+instead of inheriting a default that changes with the tool. This is the second time ruff's
+behaviour has forced that return — U1's commit E was the first.
+*What C does not change:* step 1's file content. The `TypeVar` form stays exactly as this document
+wrote it, because 2.8's amendment makes the newer syntax a choice rather than a demand, and no
+reason was found to prefer it.
 
 **U2's own Phase 2 amendments are not here.** Topic 10, 2.10's dropped conditional and 14.7's
 moved row travelled on `plan/u2-gate` and reached `main` as #5, before this document was
