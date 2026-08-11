@@ -22,7 +22,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 3 — Architecture and layering | 3.1–3.8 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
-| 6 — API contract | 6.1, 6.2, 6.4, 6.5, 6.6, 6.8 | 6.3, 6.7, 6.9 |
+| 6 — API contract | 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.8 | 6.7, 6.9 |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **84** | **26** |
+| **Total** | **85** | **25** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1884,6 +1884,87 @@ and Part 4 of `03-roadmap.md`).
   reads as a bug rather than as a covered path.
   *Source:* R1–R4, R18. *Constrained by:* 4.2, 4.4, 4.9, 5.2, 6.1, 6.6, 7.6. *Completes:* 7.6's
   unargued body. *Constrains:* 6.3, 12.2. *Defines:* F1, F13. *Realised in:* U7.
+
+- **6.3 Error response body format.** `[decided]`
+  *Decision:* **one key — `detail` — on every error response, no envelope, and no override of
+  FastAPI's validation handler.** `404`, `409` and `503` are declared in the OpenAPI document
+  through constants that sit beside the mapping table in `errors.py`.
+
+  | Code | Body |
+  |---|---|
+  | `404` | `{"detail": "Order <id> not found"}` |
+  | `409` | `{"detail": "Cannot advance order from BAKING to PREPARING"}` |
+  | `422` | Pydantic's structured list, unchanged |
+  | `503` | `{"detail": "Database unreachable"}` |
+
+  *The item's premise was false, and that is what it actually decides.* It offers a choice between
+  "one consistent shape" and "the framework default" — but **FastAPI has two defaults, differing in
+  type, not merely in wording**: `HTTPException` produces `{"detail": <string>}`, while a validation
+  failure produces `{"detail": [<object>, …]}` carrying `loc`, `msg` and `type` per field. Accepting
+  the defaults is therefore not automatically consistent, and imposing one shape means overriding
+  the handler for `RequestValidationError`. The item was framed as a cheap choice between two
+  options; it is a choice between two costs.
+
+  *What the chosen consistency asserts, stated exactly:* **one key on every error, whose type varies
+  with the class of failure** — a string where the server can state a sentence, a list where the
+  failure is per-field and there may be several. That is not the absence of a decision: it is 5.2's
+  own distinction, between malformed input and a well-formed request the rules refuse, made visible
+  in the body rather than only in the code.
+
+  *Rejected — **an envelope** (`{"error": {"code": …, "message": …}}`).* The orthodox choice and the
+  strongest alternative. It fails on **information**: Pydantic's `422` says which field failed and
+  why, per field, and squeezing it into an envelope means either discarding that detail or nesting
+  it inside — at which point the envelope has unified the outer key only, which is the thing it
+  existed to do. Its other payoff, a machine-readable code, has no consumer: 3.6 made the CLI a thin
+  adapter that branches on the HTTP status.
+  *Rejected — **RFC 7807 / `application/problem+json`***. The standard-blessed shape (`type`,
+  `title`, `status`, `detail`), carrying every cost of the envelope plus a media type nothing in
+  this stack negotiates. A standard adopted without a consumer is decoration.
+  *Rejected — **a separate `code` field***. 1.1's ceiling test: delete it and no named DoD row
+  fails. Every status maps to exactly one domain error today — `404` is `OrderNotFound`, `409` is
+  `IllegalTransition` — so `code` restates a number already in the response.
+  *Rejected — **structured `from` / `to` keys on the `409`***. The only consumer prints them; a
+  sentence does the same work without a second schema.
+
+  *Why the message names both statuses.* The one argument here resting on a graded row rather than
+  on taste: R11 is marked "an easy-to-use console client", and this string is what its user reads.
+  *"Cannot advance order from BAKING to PREPARING"* tells them what to do next; *"Illegal
+  transition"* makes them guess. 5.2 already puts both values on the domain error, so this is
+  message design, not data collection.
+
+  *The OpenAPI declaration, and the duplication the developer caught.* FastAPI generates the `422`
+  schema itself and documents the success body from `response_model`, but **`404` and `409` reach
+  the document only if a route declares them** — they are produced at runtime by `errors.py`'s
+  handler, and nothing on the route mentions them. This is true under any body format, so it is not
+  an argument for or against an envelope. Left undeclared, the document states that the operation
+  returns `200` or `422` — not incomplete but **inaccurate**, against precisely the property 2.3
+  bought FastAPI for.
+  **The first form of this decision put a literal dict on each route, and called it free. It is
+  not.** The status number would then be written both where it executes (`_STATUS`) and where it is
+  described, and a later remapping would leave the document asserting the old code with nothing to
+  catch it — 13.6's line, which 6.1 had invoked two items earlier to reject `driver_id` beside the
+  nested driver. The rule was applied to one item and ignored in the next.
+  *The form that ships:* named constants declared beside the table that produces the behaviour, and
+  composed per route.
+
+  ```python
+  # entrypoints/api/errors.py
+  _STATUS   = {OrderNotFound: 404, IllegalTransition: 409}
+  NOT_FOUND = {404: {"description": "Order not found"}}
+  CONFLICT  = {409: {"description": "Illegal transition"}}
+  ```
+
+  The number is written once, in one file, two lines apart. What stays on the route is which
+  failures belong to it — genuine per-route information: `POST /orders` takes neither,
+  `GET /orders/{id}` takes `NOT_FOUND`, `PATCH` takes both.
+  *Rejected — **declaring nothing***. It removes the duplication completely and leaves the contract
+  document wrong. An inaccuracy neutralised by one constant beats one left standing.
+
+  *Closes 6.1's hand-off:* the `503` body of `GET /health` carries the same key. It is not a domain
+  error and does not pass through the handler, but it is written by hand in one route and there is
+  no reason for it to look different.
+  *Source:* `CLAUDE.md` §6, R11, R18. *Constrained by:* 2.3, 3.1, 3.6, 5.2, 6.1, 6.2.
+  *Constrains:* 9.4, 12.2. *Realised in:* U7.
 
 - **6.4 Driver registration payload.** `[decided]`
   *Decision:* the request body carries **no status field**. Every driver is registered
