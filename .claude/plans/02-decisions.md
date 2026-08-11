@@ -26,12 +26,12 @@ status markers, precisely so that this table cannot be contradicted.
 | 7 — Broker contract | 7.5, 7.6 | 7.1–7.4, 7.7 |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
-| 10 — Configuration | — | 10.1–10.5 |
+| 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **70** | **40** |
+| **Total** | **75** | **35** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -595,16 +595,17 @@ and Part 4 of `03-roadmap.md`).
   *Two conditional lines, and why they are approved now rather than later.* Two open items can each
   require a library, and neither is in U1:
 
-  | Conditional | Decided by | Unit | If decided otherwise |
+  | Conditional | Decided by | Unit | Outcome |
   |---|---|---|---|
-  | `pydantic-settings` | 10.2 — a typed settings object or raw environment reads | U2 | `os.environ` with a hand-written dataclass — the line is dropped |
-  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | neither alternative needs a dependency — the line is dropped |
+  | `pydantic-settings` | 10.2 — a typed settings object or raw environment reads | U2 | **dropped.** 10.2 chose `pydantic` alone, so no dependency is added and neither lock file changes |
+  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | still open; neither alternative needs a dependency, and the line is dropped if either is chosen |
 
   They enter `pyproject.toml` in the same commit as the decision that requires them, and
   `uv pip compile` is re-run. **"Not incremental" governs the act of approval, not the file being
   frozen** — what it forbids is a fresh approval round mid-unit, which conditioning them now
   prevents. Withholding them until 10.2 and 4.6 close would leave this item open and U1 blocked on
-  it. (`pydantic-settings` carries `.env` loading, so there is no separate `python-dotenv`.)
+  it. There is no separate `python-dotenv` either: 10.3 has the application parse no `.env` file at
+  all, and Compose reads it for interpolation only.
 
   *Not on the list, and each has an owner:* `uv` — a local tool, not a dependency (2.9);
   `pip-tools` — dropped with the generator (2.9); `pre-commit` — 2.8; `pytest-asyncio`, `aio-pika`,
@@ -616,7 +617,8 @@ and Part 4 of `03-roadmap.md`).
   *Carried forward to 11.9:* `psycopg[binary]` has no musl wheel, so an Alpine base breaks this
   list. 2.5 recorded it; it is repeated here because the list is where it will be read.
   *Source:* `CLAUDE.md` §6. *Constrained by:* 2.3, 2.5, 2.6, 2.7, 2.8, 2.9, 3.6, 3.7, 12.3.
-  *Constrains:* 11.9. *Conditional on:* 4.6, 10.2. *Realised in:* U1.
+  *Constrains:* 11.9. *Conditional on:* 4.6 — 10.2 closed its line by declining it.
+  *Realised in:* U1.
 
 
 ## Topic 3 — Architecture and layering
@@ -1905,6 +1907,235 @@ and Part 4 of `03-roadmap.md`).
   *Source:* R11, development environment. *Answers:* Q20.
 
 
+## Topic 10 — Configuration
+
+- **10.1 The complete environment variable list.** `[decided]`
+  *Decision:* **seven variables the application reads, all carrying the `PIZZA_` prefix, in two
+  settings classes; five more that only the vendor images and Compose interpolation read.** This
+  table is the authority — `.env.example` (10.3) and `docker-compose.yml` (U9) transcribe it, and
+  neither is a second original.
+
+  **Read by our code.** Every field is required, because 10.2 gives the settings classes no
+  defaults, so the *Value* column is what `docker-compose.yml` supplies as `${VAR:-…}`.
+
+  | Variable | Type | Value Compose supplies | Read by | Owner |
+  |---|---|---|---|---|
+  | `PIZZA_DATABASE_URL` | non-empty `str` | `postgresql+psycopg://${POSTGRES_USER:-pizza}:${POSTGRES_PASSWORD:-pizza}@postgres:5432/${POSTGRES_DB:-pizza}` | api, worker | 2.5 |
+  | `PIZZA_BROKER_URL` | non-empty `str` | `amqp://${RABBITMQ_DEFAULT_USER:-pizza}:${RABBITMQ_DEFAULT_PASS:-pizza}@rabbitmq:5672/` | api, worker | 2.7 |
+  | `PIZZA_LOG_LEVEL` | one of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` | `INFO` | api, worker | 10.4 |
+  | `PIZZA_BROKER_PUBLISH_TIMEOUT_SECONDS` | `float` > 0 | `5` | api | 7.5 |
+  | `PIZZA_DISPATCH_RETRY_DELAY_SECONDS` | `int` > 0 | `8` | worker, and whichever process declares the topology (7.1) | 8.2 |
+  | `PIZZA_DISPATCH_MAX_RETRIES` | `int` ≥ 1 | `8` | worker | 8.3 |
+  | `PIZZA_API_BASE_URL` | `str`, `http(s)` scheme, no trailing slash | `http://api:8000` | cli, tests | 9.3 |
+
+  **Read by the infrastructure, never by our code:** `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+  `POSTGRES_DB`, `RABBITMQ_DEFAULT_USER`, `RABBITMQ_DEFAULT_PASS` — all `pizza` (10.5). Compose
+  reads those same five to assemble the two URLs above, so **no credential is written twice**. The
+  broker vhost stays `/`, the image's default, and is not a variable because nothing varies it.
+  What is deliberately *not* configuration — prefetch, pool sizing, the internal port — is 10.4.
+
+  *Two classes, and why not one:* `ServiceSettings` holds the first six and is loaded by the api
+  and the worker; `ClientSettings` holds `api_base_url` alone and is loaded by the CLI and the
+  integration suite, which speak HTTP and nothing else (3.6, 12.3). A single class over all seven
+  would force the CLI container to supply a database URL it never opens, since every field is
+  required.
+  *Rejected — one class per concern* (`DatabaseSettings`, `BrokerSettings`, `DispatchSettings`, …):
+  four more classes to save one unread field in each of two services, which is the speculative
+  abstraction `CLAUDE.md` §6 names. The cost is accepted and stated instead — the api carries the
+  retry delay and the worker carries the publish timeout, one value each that it does not read.
+  *Rejected — pydantic's URL types* (`PostgresDsn`, `AmqpDsn`, `AnyHttpUrl`) for the three
+  addresses. They validate more, and here they cost more than they buy: in v2 they do not inherit
+  from `str`, so every consumer converts; they append a trailing slash when there is no path, which
+  turns `http://api:8000` into `http://api:8000/` and every `f"{base}/orders"` into a double slash;
+  and `PostgresDsn`'s allowed-scheme list is a pydantic-version fact that has to keep including
+  `postgresql+psycopg` (2.5). SQLAlchemy and `pika` parse their own URLs and report a better error
+  than ours would. `api_base_url` instead carries a validator requiring an `http(s)` scheme and
+  stripping a trailing slash, so U10 and U12 join paths directly and the papercut never arrives.
+
+  *Naming rules, so U5 to U9 invent no variants:* the `PIZZA_` prefix for everything our code reads
+  and nothing else; the unit in the name (`_SECONDS`), because 8.2's `x-message-ttl` is in
+  milliseconds and the conversion is a multiplication by 1000 at the declaration site; no
+  abbreviations; and a new variable requires a decision record — one added to Compose without a
+  field in `config.py` fails 10.3's drift test.
+
+  *What this hands forward, so no value returns as a blocker:* **U5** reads `PIZZA_DATABASE_URL`
+  only, and Alembic — if 4.6 chooses it — takes that same variable rather than one of its own.
+  **U6** gets the broker URL and the delay with its unit fixed; only *who declares* the topology
+  stays open (7.1). **U8** gets the cap's exact meaning (10.4). **U9** supplies each variable per
+  service exactly as *Read by* says, and may add one Compose-only variable if 11.8 chooses a
+  variable host port — which our code never reads. **U10** and **U12** get a base URL guaranteed
+  without a trailing slash.
+  *Source:* R16, `CLAUDE.md` §3, DoD "Code Quality". *Constrained by:* 1.2, 2.5, 2.7, 3.6, 7.5,
+  8.2, 8.3, 9.3, 12.3. *Constrains:* 10.2, 10.3, 10.4, 10.5, and every unit from U5 onward.
+
+- **10.2 Configuration loading mechanism.** `[decided]`
+  *Decision:* **`pydantic` alone — no new dependency.** `src/pizza/config.py` declares two frozen
+  `BaseModel`s with `extra="forbid"`, and one loader per class collects the `PIZZA_`-prefixed
+  variables out of a mapping and validates them:
+
+  ```python
+  # src/pizza/config.py
+  _PREFIX = "PIZZA_"
+
+  class ServiceSettings(BaseModel):                     # api, worker
+      model_config = ConfigDict(extra="forbid", frozen=True)
+      database_url: str
+      ...                                               # 10.1's first six fields
+
+  def load_service_settings(env: Mapping[str, str]) -> ServiceSettings:
+      return ServiceSettings.model_validate(
+          {k.removeprefix(_PREFIX).lower(): v for k, v in env.items() if k.startswith(_PREFIX)}
+      )
+  ```
+
+  *Three properties, and each is the reason for one line of it.* The environment holds only
+  strings, so `"8"` reaching an `int` field is coerced while `"abc"` is an error. `ValidationError`
+  reports **every** fault at once, which is what a startup failure should print rather than the
+  first missing variable. And `extra="forbid"` over a dict we assembled ourselves rejects
+  `PIZZA_LOG_LEVL=DEBUG` instead of ignoring it. The loader takes the mapping as an argument rather
+  than reaching for `os.environ` itself, so its test passes a dict and touches no process state,
+  which is what `CLAUDE.md` §5 asks of a deterministic test.
+
+  *Where the module lives:* `src/pizza/config.py`, beside 3.1's four directories rather than inside
+  one of them. It is not `domain/` or `application/` — the core must not know an environment exists
+  — and it is not `infrastructure/`, because adapters receive their values as constructor
+  arguments. **The rule, written so it can be checked in a diff: no module under `domain/` or
+  `application/` imports `pizza.config`.** 3.1 already left file placement to later items
+  ("whether `ids.py` exists follows 4.7"), and this file changes no layer, no arrow and no import
+  rule.
+  *Nothing instantiates it at import time* — there is no `settings = load_service_settings(...)` at
+  module level. 14.7 makes `python -c "import pizza"` a Definition-of-Done command, and a module
+  that read the environment on import would make that command require a full environment. Loading
+  is a call, made once by each composition root: `entrypoints/api/main.py`,
+  `entrypoints/worker/main.py`, `entrypoints/cli/main.py`, and the integration suite.
+
+  *Rejected — `pydantic-settings`,* the conditional line 2.10 pre-approved for exactly this item,
+  and the choice a reader of the FastAPI ecosystem would expect to find. It removes the collector,
+  and it was declined on a checked fact: its `extra="forbid"` is enforced by the **dotenv** source,
+  while the environment source walks the declared fields and never sees a variable that maps to
+  none. Under Compose the application parses no `.env` file (10.3), so a mistyped `PIZZA_` variable
+  would be ignored in silence and the service would start on a default nobody chose. What remains
+  of its advantage — name-to-field mapping, and parsing a file we do not read — is the eight lines
+  above, and it would cost a dependency plus a regeneration of both lock files (2.9).
+  *Rejected — the standard library alone,* `os.environ` into a frozen dataclass. Zero dependencies,
+  against about forty lines of required-field checks, `int`/`float` parsing, range checks and error
+  aggregation, which then need tests of their own — re-implementing in code what a dependency
+  already in the project performs from a declaration.
+  *Source:* `CLAUDE.md` §3, §6. *Constrained by:* 2.3, 3.1, 10.1, 14.7. *Constrains:* 10.3.
+  *Closes 2.10's conditional line.* *Realised in:* U2.
+
+- **10.3 `.env` versus `.env.example`.** `[decided]`
+  *Decision:* three roles. 14.6 already verified the two mechanical facts this rests on — `.env` is
+  ignored, `.env.example` is not — so neither is re-decided here.
+
+  | File | In git | Who reads it | What it does |
+  |---|---|---|---|
+  | `.env` | no | Compose only | substitutes `${…}` **inside `docker-compose.yml`**. It is never passed into a container, and the application never parses it |
+  | `.env.example` | yes | nobody, at runtime | the catalogue of the surface, and the template for `cp .env.example .env` |
+  | `docker-compose.yml` | yes | Compose | the one place a default value is written (10.1) |
+
+  *The distinction worth stating, because it is where this is usually got wrong:* a variable reaches
+  a process only through a service's `environment:` block. `.env` feeds interpolation, not
+  containers — which is exactly why every default is written `${VAR:-value}`. Without a `.env` the
+  default applies, so a reviewer needs no step 0 (1.2); with one, the reviewer's value wins.
+  *Rejected — `env_file:` on the api and worker services.* It would pass `.env` straight into the
+  containers and remove the interpolation entirely, but a missing file is an error unless the entry
+  carries `required: false`, which needs Compose 2.24 — and 11.10 has not fixed a version floor.
+  Interpolation buys the same override surface with no version requirement at all.
+
+  *`.env.example` carries ten active `NAME=value` lines* — 10.5's five vendor variables, 10.4's four
+  tunables, and `PIZZA_API_BASE_URL` — each with the value Compose defaults to, so the file is a
+  complete and valid environment. `PIZZA_DATABASE_URL` and `PIZZA_BROKER_URL` appear in **one prose
+  comment** naming both and stating that Compose assembles them from the values above, so setting
+  them in the file has no effect.
+  *Rejected — writing those two as commented `# NAME=value` lines.* In an env file that form reads
+  as an invitation to uncomment, and here uncommenting would change nothing whatever: a line that
+  invites an action with no result is worse than no line. The comment answers the same question — a
+  reader who found `database_url` in `config.py` and grepped for it — without pretending to be
+  settable.
+
+  *What keeps the file from drifting:* 13.6 warns that a fact written twice will eventually disagree
+  with itself, and `.env.example` is a second place. U2 therefore carries one unit test that scans
+  every `PIZZA_[A-Z_]+` token in the file — comments included — and compares that set to the fields
+  declared in 10.2's two classes. A renamed field, an undocumented new variable, and a documented
+  name that nothing reads all fail it. The vendor variables carry no `PIZZA_` prefix and are outside
+  the comparison.
+  *Source:* R16, `CLAUDE.md` §3, §4. *Constrained by:* 1.2, 10.1, 10.2, 14.6. *Leaves to U9:* the
+  `environment:` blocks that transcribe 10.1. *Realised in:* U2.
+
+- **10.4 Which values are tunable.** `[decided]`
+  *Decision:* **four variables, and everything else fixed.**
+
+  | Variable | Value | Fixed by |
+  |---|---|---|
+  | `PIZZA_BROKER_PUBLISH_TIMEOUT_SECONDS` | `5` | this item's own brief in the inventory; 7.5 bounds a `PATCH` at twice it |
+  | `PIZZA_DISPATCH_RETRY_DELAY_SECONDS` | `8` | 8.2 — the wait queue's `x-message-ttl` |
+  | `PIZZA_DISPATCH_MAX_RETRIES` | `8` | 8.3 — the retry bound |
+  | `PIZZA_LOG_LEVEL` | `INFO` | here; the log's *format* is 8.7 and stays open |
+
+  *Where 8 and 8 come from, because the two numbers are one decision.* 1.2 puts two opposing demands
+  on the same product. Step 8 waits one cycle for the dispatch line, so the delay must be
+  single-digit seconds; step 7 is a person registering a driver by hand, so the whole budget must
+  exceed 60 s. 8 × 8 = 64 s satisfies both, with one number to remember instead of two.
+  **The cap counts redeliveries, not total attempts** — nine attempts in all, eight waits, 64 s from
+  the first rejection to `FAILED`. Read the other way it is seven waits and 56 s, under 1.2's floor:
+  an off-by-one that would surface only when somebody ran the demo. It is written here in words so
+  that U8 does not choose.
+  *Why the floor matters more than it looks:* 8.3 records as an accepted cost that an order which
+  exhausts its budget is **not** reassigned when a driver registers later. A budget expiring in the
+  middle of step 7 therefore does not merely look wrong — the demo cannot recover from it, and the
+  reviewer has to place a new order.
+  *Not a code invariant.* The settings classes do not enforce `delay × retries > 60`. Enforcing it
+  would forbid the short test-only tuning FW13 describes, and would turn a property of the demo path
+  into a law of the configuration. What is enforced is per field: a timeout above zero, a delay
+  above zero, a cap of at least one, and a log level from the five names.
+  *The one condition under which the cap could drop is named:* **FW13**. There is a single
+  `TTL × cap` product, 11.6 gives the suite the shipped configuration, and the demo and an
+  exhaustion scenario pull that number in opposite directions. Nothing else reopens it — in
+  particular **FW1 does not**, because it removes the keystroke at `DELIVERED` and not the one at
+  step 7, which is where the floor comes from.
+
+  *Fixed, and each with an owner:*
+
+  | Value | Why it is not a variable |
+  |---|---|
+  | `prefetch = 1` | 8.5 decided it with a full rationale, and FW7 records that a wider window becomes actively harmful the moment there is more than one consumer. An environment knob invites exactly that setting |
+  | SQLAlchemy pool sizing | 2.5 left "whether it becomes tunable" to this item. It does not: the library defaults stand, and `pool_pre_ping=True` is code, not configuration |
+  | the API's internal port, `8000` | a constant in the image's command. Publishing a host port is 11.8, which may add a Compose-only variable that our code never reads |
+  | `httpx`'s client timeout | the library's own 5 s default (2.6). Nothing has asked to change it |
+  | exchange, queue and routing-key names | 7.1 — constants. They do not differ between environments, so they are not configuration |
+
+  *Source:* R16, `CLAUDE.md` §5. *Constrained by:* 1.2, 2.5, 2.6, 7.5, 8.2, 8.3, 8.5.
+  *Answers:* 2.5's deferred pool-sizing question. *Deferred to:* FW13.
+
+- **10.5 Local credentials.** `[decided]`
+  *Decision:* **`pizza` throughout** — the PostgreSQL user, password and database name, and the
+  RabbitMQ user and password; vhost `/`. They live in `docker-compose.yml` as
+  `${POSTGRES_PASSWORD:-pizza}` and are catalogued in `.env.example`. Nothing under `src/` carries
+  them (10.2).
+  *Why they must be set at all, rather than left to the images:* PostgreSQL refuses to initialise
+  without `POSTGRES_PASSWORD`, and RabbitMQ's built-in `guest` may connect only from localhost —
+  the api and the worker connect from other containers, so `guest` would be refused. Explicit
+  credentials are a requirement here, not a preference.
+  *Why this does not commit a secret.* §4 forbids committing a secret or a local environment file;
+  what is committed is a non-secret local default. These values authorise nothing outside an
+  environment that `docker compose down` destroys, because 11.7 defines no named volumes (A19).
+  **Stated deliberately, because 14.1 makes it permanent:** the repository is public and §4 forbids
+  rewriting pushed history, so a secret committed once cannot be withdrawn. This record asserts
+  that these are not secrets, and names the conditions that assertion depends on.
+  *Reopen condition — the assertion stands on two legs, not one.* It holds while the environment is
+  disposable (A19) **and** no published port carries these credentials (11.8, open). Named volumes
+  break the first — FW13's second point already records that A19 reopens with them — and publishing
+  `5432` to the host breaks the second. If either changes, this item is decided again.
+  *Rejected — distinct random values:* they would have to be committed anyway, or "step 0" returns
+  against 1.2, so the randomness buys nothing and makes the assembled URLs unreadable.
+  *Rejected — `POSTGRES_HOST_AUTH_METHOD=trust`,* no password at all: a broader deviation than one
+  known local password, and it reads worse to a reviewer.
+  *Source:* `CLAUDE.md` §4, DoD "Docker Deployment". *Constrained by:* 1.2, 11.7, 14.1.
+  *Constrains:* 10.1, 10.3. *Defines:* A25. *Revisit if:* named volumes arrive, or 11.8 publishes
+  the database port.
+
+
 ## Topic 11 — Docker Compose
 
 - **11.3 How the test suite is auto-executed.** `[decided]`
@@ -2368,12 +2599,17 @@ and Part 4 of `03-roadmap.md`).
   | From | "runs" means |
   |---|---|
   | U1 | `ruff format --check .` · `ruff check .` · `mypy src tests` · `python -c "import pizza"` |
-  | U4 | + `pytest tests/unit` |
+  | U2 | + `pytest tests/unit` |
   | U9 | + `docker compose up` reaches 11.3's PASS summary and the test service exits zero |
   | U11 | + the same with the full integration suite |
 
   `python -c "import pizza"` is not filler: 3.3 chose src-layout so an import resolves only
   through the install, so its failure means the package is not installed.
+  *The `pytest` row moved from U4 to U2 on 2026-08-11.* U4 is the unit that fills
+  `tests/unit/`, but U2 gets there first: 10.2's loader is pure logic with no infrastructure, so
+  §5 admits its tests as free, and §8.2 requires every step's behaviour to be verified by a test
+  that would fail if it broke. Recorded here rather than as a reading inside U2's plan, because a
+  Phase 3 document may fill a silence this file left but may not amend one of its rows.
   Each Phase 3 document states its own list, and it applies **per step commit** — so `main`
   satisfies §8.6 after a merge by construction.
   *Rejected:* treating it as vacuous until U9 — §8.6 would be ceremony for eight units, and
@@ -2419,6 +2655,8 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A22** † | `ORDER_READY` is published after the commit; if the broker is unreachable the `PATCH` still returns `200` and the event is lost | 7.5, 7.6 |
 | **A23** † | Every event is recorded in an `outbox` table, but nothing replays unpublished rows | 7.5 |
 | **A24** † | "Microservice" means separate processes and containers, not separate codebases — the API and the worker are two entrypoints into one package over one database | 3.3 |
+| **A25** † | The local credentials are non-secret committed defaults for a disposable environment; a real deployment supplies its own | 10.5 |
+| **A26** | Every configuration value comes from the environment, and `docker-compose.yml` is the only place a default is written | 10.1, 10.2 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".
 It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the structure is now
