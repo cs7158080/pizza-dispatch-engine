@@ -47,9 +47,9 @@ def test_the_lifecycle_walks_forward_once_per_step() -> None:
         (OrderStatus.DELIVERED, False, True),
     ]
 
-    for to, must_publish, releases_driver in expected:
-        result = order.advance_to(to)
-        assert order.status is to
+    for target, must_publish, releases_driver in expected:
+        result = order.advance_to(target)
+        assert order.status is target
         assert result.must_publish is must_publish
         assert result.releases_driver is releases_driver
 
@@ -64,8 +64,8 @@ def test_skipping_reversing_and_repeating_are_all_refused() -> None:
     skipping = _an_order()
     with pytest.raises(IllegalTransition) as refused:
         skipping.advance_to(OrderStatus.BAKING)
-    assert refused.value.current is OrderStatus.RECEIVED
-    assert refused.value.requested is OrderStatus.BAKING
+    assert refused.value.current_status is OrderStatus.RECEIVED
+    assert refused.value.requested_status is OrderStatus.BAKING
     assert skipping.status is OrderStatus.RECEIVED
 
     baking = _an_order()
@@ -93,8 +93,8 @@ def test_an_order_admits_exactly_one_driver() -> None:
     assert assigned.can_be_assigned() is False
 
     delivered = _an_order()
-    for to in _TO_DELIVERED:
-        delivered.advance_to(to)
+    for step in _TO_DELIVERED:
+        delivered.advance_to(step)
     assert delivered.can_be_assigned() is False
 
 
@@ -109,8 +109,8 @@ def test_a_failed_dispatch_survives_delivery() -> None:
     order.mark_dispatch_failed()
     assert order.assignment_state is AssignmentState.FAILED
 
-    for to in _TO_DELIVERED:
-        order.advance_to(to)
+    for step in _TO_DELIVERED:
+        order.advance_to(step)
 
     assert order.status is OrderStatus.DELIVERED
     assert order.assignment_state is AssignmentState.FAILED

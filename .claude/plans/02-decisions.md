@@ -1309,14 +1309,14 @@ and Part 4 of `03-roadmap.md`).
       @classmethod
       def new(cls, id, customer_name, address, items, now) -> "Order"   # sets RECEIVED / PENDING
 
-      def advance_to(self, to: OrderStatus) -> TransitionResult:
-          if _NEXT.get(self.status) is not to:
-              raise IllegalTransition(self.status, to)                  # 5.2 → 409
-          self.status = to
-          if to is DELIVERED and self.assignment_state is not FAILED:
+      def advance_to(self, requested_status: OrderStatus) -> TransitionResult:
+          if _NEXT.get(self.status) is not requested_status:
+              raise IllegalTransition(self.status, requested_status)    # 5.2 → 409
+          self.status = requested_status
+          if self.status is DELIVERED and self.assignment_state is not FAILED:
               self.assignment_state = COMPLETED
-          return TransitionResult(must_publish=to in (BAKING, READY),
-                                  releases_driver=to is DELIVERED)
+          return TransitionResult(must_publish=self.status in (BAKING, READY),
+                                  releases_driver=self.status is DELIVERED)
 
       def can_be_assigned(self) -> bool     # driver_id is None and status is not DELIVERED — 5.5
       def assign_to(driver_id, now) -> None # writes driver_id, ASSIGNED and assigned_at together
@@ -1373,6 +1373,12 @@ and Part 4 of `03-roadmap.md`).
   *`FAILED` is not terminal:* R5 publishes twice, so `FAILED → ASSIGNED` occurs on an ordinary path.
   Corrected in 4.4 and 7.6.
 
+  *The transition parameter is `requested_status`, renamed 2026-08-12 — a name and nothing else.*
+  It read `to`, which is clear beside the method's own name and vague everywhere else: the use
+  case, the API edge and `IllegalTransition` were carrying three names for one value. `requested`
+  is the accurate word rather than `next`, because a caller may ask for a status that is not the
+  adjacent one — that path is 5.2's whole subject, and 9.2 makes it the ordinary case at the CLI.
+  The signature, the guards and the behaviour are untouched. Found by review of U3's code.
   *Source:* R1, R4, `CLAUDE.md` §2, §3. *Constrained by:* 2.5, 3.2, 4.2–4.4, 4.7, 4.8, 5.1–5.6, 8.1,
   8.3. *Narrows:* 4.4. *Voids one argument in:* 7.6. *Realised in:* U3.
 

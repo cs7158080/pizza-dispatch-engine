@@ -80,19 +80,19 @@ class Order:
             created_at=now,
         )
 
-    def advance_to(self, to: OrderStatus) -> TransitionResult:
+    def advance_to(self, requested_status: OrderStatus) -> TransitionResult:
         """Move one step forward, or refuse (5.1, 5.2)."""
-        if _NEXT.get(self.status) is not to:
-            raise IllegalTransition(self.status, to)
-        self.status = to
+        if _NEXT.get(self.status) is not requested_status:
+            raise IllegalTransition(self.status, requested_status)
+        self.status = requested_status
         if (
-            to is OrderStatus.DELIVERED
+            self.status is OrderStatus.DELIVERED
             and self.assignment_state is not AssignmentState.FAILED
         ):
             self.assignment_state = AssignmentState.COMPLETED
         return TransitionResult(
-            must_publish=to in (OrderStatus.BAKING, OrderStatus.READY),
-            releases_driver=to is OrderStatus.DELIVERED,
+            must_publish=self.status in (OrderStatus.BAKING, OrderStatus.READY),
+            releases_driver=self.status is OrderStatus.DELIVERED,
         )
 
     def can_be_assigned(self) -> bool:

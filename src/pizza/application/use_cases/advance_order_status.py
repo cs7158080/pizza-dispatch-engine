@@ -31,7 +31,7 @@ class AdvanceOrderStatus:
         self._clock = clock
         self._publisher = publisher
 
-    def __call__(self, order_id: UUID, to: OrderStatus) -> Order:
+    def __call__(self, order_id: UUID, requested_status: OrderStatus) -> Order:
         now = self._clock.now()
         event: OrderReadyEvent | None = None
 
@@ -40,7 +40,8 @@ class AdvanceOrderStatus:
             if order is None:
                 raise OrderNotFound(order_id)
 
-            result = order.advance_to(to)  # raises IllegalTransition (5.2)
+            # Raises IllegalTransition when the move is not the adjacent one (5.2).
+            result = order.advance_to(requested_status)
             uow.orders.save(order)
 
             if result.releases_driver and order.driver_id is not None:

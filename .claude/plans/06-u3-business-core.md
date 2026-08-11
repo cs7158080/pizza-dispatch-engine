@@ -296,7 +296,7 @@ opened. `RegisterDriver` is the same shape over `Driver.new`.
 **Files changed:** `src/pizza/domain/errors.py` gains `OrderNotFound`.
 **File created:** `src/pizza/application/use_cases/advance_order_status.py`.
 
-`AdvanceOrderStatus` holds `_uow`, `_clock` and `_publisher`, and `__call__(order_id, to)`
+`AdvanceOrderStatus` holds `_uow`, `_clock` and `_publisher`, and `__call__(order_id, requested_status)`
 returns the updated `Order` — which is what 7.6's `200` needs. Inside one transaction it loads
 the order, raises `OrderNotFound` if there is none, calls `advance_to` and lets
 `IllegalTransition` escape to the caller (5.2), saves the order, and then acts on the two flags:

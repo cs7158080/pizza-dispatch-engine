@@ -17,10 +17,14 @@ if TYPE_CHECKING:
 class IllegalTransition(Exception):
     """5.1's graph refused the move. The API maps this to 409 (5.2)."""
 
-    def __init__(self, current: OrderStatus, requested: OrderStatus) -> None:
-        super().__init__(f"cannot move from {current.value} to {requested.value}")
-        self.current = current
-        self.requested = requested
+    def __init__(
+        self, current_status: OrderStatus, requested_status: OrderStatus
+    ) -> None:
+        super().__init__(
+            f"cannot move from {current_status.value} to {requested_status.value}"
+        )
+        self.current_status = current_status
+        self.requested_status = requested_status
 
 
 class OrderNotFound(Exception):
