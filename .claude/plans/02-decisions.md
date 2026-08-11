@@ -22,7 +22,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 3 — Architecture and layering | 3.1–3.8 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
-| 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
+| 6 — API contract | 6.1, 6.4, 6.5, 6.6, 6.8 | 6.2, 6.3, 6.7, 6.9 |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **82** | **28** |
+| **Total** | **83** | **27** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -1438,7 +1438,7 @@ and Part 4 of `03-roadmap.md`).
   with self._uow as uow:
       uow.orders.add(order)                # add returns None
       uow.commit()
-  return order.id                          # known before the transaction opened
+  return order                             # its id was known before the transaction opened
   ```
 
   *Why not a sequential integer — the alternative at its real strength.* It is genuinely easier
@@ -1490,6 +1490,11 @@ and Part 4 of `03-roadmap.md`).
   in the same change. *Removes* the id generator from the list of ports 3.4 defines.
   *Left to 3.4:* whether signatures name `UUID` directly or a `NewType` per entity — a question
   about the typed boundary, which is 3.4's subject.
+  *Corrected by 6.1 on 2026-08-11:* the sample's last line was `return order.id`, and `POST /orders`
+  responds with the whole order, so `place_order` returns the entity. The line is amended in place
+  rather than annotated, because it is code a reader would copy. The identifier scheme this item
+  decides is unchanged — the id is still known before the transaction opens, which is what the line
+  was written to show.
   *Source:* R1, R4, R11, R12. *Constrained by:* 2.5, 3.1, 3.5, 4.8, 7.5. *Constrains:* 3.4, 4.1,
   4.5, 4.6, 7.2.
   *Revisit if:* a test needs to predict an identifier, or an identifier acquires business meaning —
@@ -1777,6 +1782,54 @@ and Part 4 of `03-roadmap.md`).
 
 
 ## Topic 6 — API contract
+
+- **6.1 Request and response schemas.** `[decided]`
+  *Decision:* **three request schemas and four response schemas.** Every request model is declared
+  `extra="forbid"` (2.3), and every violation returns `422` (4.2).
+
+  | Endpoint | Request | Response |
+  |---|---|---|
+  | `POST /orders` | `CreateOrderRequest` — `customer_name`, `address`, `items`; the bounds are 4.2's | `OrderResponse` |
+  | `PATCH /orders/{id}/status` | `UpdateStatusRequest` — `status` only | `OrderResponse` |
+  | `GET /orders/{id}` | — | `OrderResponse` |
+  | `GET /orders` | — | `list[OrderSummary]` |
+  | `POST /drivers` | `RegisterDriverRequest` — `name` only (6.4), 1 to 100 characters | `DriverResponse` |
+  | `GET /health` | — | `{"status": "ok"}` |
+
+  **`OrderResponse`** — nine keys: `id`, `customer_name`, `address`, `items`, `status`,
+  `assignment_state`, `assigned_at`, `created_at`, `driver`. Exactly 4.1's nine entity fields, with
+  `driver_id` **replaced by** 6.5's nested object rather than carried alongside it — 13.6's line,
+  that a fact written in two places eventually disagrees with itself, applies to a JSON document as
+  much as to this file.
+  **`OrderSummary`** — 6.6's five fields, unchanged.
+  **`DriverResponse`** — `{id, name, status}`, and it **is** 6.5's nested object: one schema serves
+  both the registration response and the nesting. `drivers.created_at` stays in the entity as 5.4's
+  tie-breaker and never leaves the system — delete it from the response and no named DoD row fails
+  (1.1).
+
+  *`POST /orders` returns the whole order, and this corrects 4.7.* That record's sample has the use
+  case `return order.id`; `place_order` returns the `Order`, and `register_driver` the `Driver`.
+  The reason is 1.2's step 3 — placing an order shows `RECEIVED` and `PENDING` — which under an
+  id-only response costs a second round trip for a fact the server has just written. 4.7's own
+  subject, the identifier scheme, is untouched.
+  *Rejected:* **`201` with `{"id": …}` and a `Location` header** — the orthodox REST shape, and it
+  buys conformance while charging that round trip on a path that is itself a graded row. Status
+  codes are 6.2's subject, not this item's.
+
+  *Two smaller calls.* **Timestamps are not pinned to a spelling.** The contract is ISO 8601 with an
+  explicit UTC offset — Pydantic v2's default, no custom serializer — and 12.3's assertions are on
+  presence and on `null`. Pinning the final character buys nothing and invites a test that breaks on
+  a library upgrade. **Status values match exactly, in upper case.** 4.9's `Enum` carries explicit
+  string values and Pydantic rejects anything else with `422`, which is precisely 5.2's "an
+  unrecognised status string never reaches the core". Case-insensitive parsing would be hand-written
+  leniency in a contract with no client that needs it.
+
+  *Handed to 6.3:* the `503` body of `GET /health`. It is not a domain error, so 5.2's table does
+  not reach it and this item does not decide it.
+  *Recorded as an assumption:* the brief specifies no response body for `POST /orders` or
+  `PATCH /orders/{id}/status` — **A27**.
+  *Source:* R1–R4, R11, R18. *Constrained by:* 4.1, 4.2, 4.3, 4.7, 6.4, 6.5, 6.6, 7.6.
+  *Corrects:* 4.7's sample line. *Constrains:* 6.2, 6.3. *Realised in:* U7.
 
 - **6.4 Driver registration payload.** `[decided]`
   *Decision:* the request body carries **no status field**. Every driver is registered
@@ -3322,6 +3375,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A24** † | "Microservice" means separate processes and containers, not separate codebases — the API and the worker are two entrypoints into one package over one database | 3.3 |
 | **A25** † | The local credentials are non-secret committed defaults for a disposable environment; a real deployment supplies its own | 10.5 |
 | **A26** | Every configuration value comes from the environment, and `docker-compose.yml` is the only place a default is written | 10.1, 10.2 |
+| **A27** | `POST /orders` and `PATCH /orders/{id}/status` return the full order representation; the brief specifies no response body for either | 6.1 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".
 It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the structure is now
