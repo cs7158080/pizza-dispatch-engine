@@ -373,8 +373,10 @@ list (6.6). Neither commits (3.5).
 
 1. The file exists, with the content stated.
 2. The five commands of §4 exit zero, and the layering command prints nothing.
-3. `queries.py` contains no `commit`, and `OrderDetail` carries entities rather than a response
-   shape — 6.5's "the core never sees this shape" checked where it could be broken.
+3. `queries.py` calls no `.commit(`, and `OrderDetail` carries entities rather than a response
+   shape — 6.5's "the core never sees this shape" checked where it could be broken. *The check
+   is for the call, not the word, by step 6's ruling:* the module docstring says it never
+   commits, and that sentence is the contract rather than a breach of it.
 4. `pytest tests/unit` collects eleven, and `git status --short` is clean.
 
 ---
