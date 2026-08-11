@@ -22,7 +22,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 3 — Architecture and layering | 3.1–3.8 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
-| 6 — API contract | 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.8 | 6.7, 6.9 |
+| 6 — API contract | 6.1–6.8 | 6.9 |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **85** | **25** |
+| **Total** | **86** | **24** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2058,6 +2058,17 @@ and Part 4 of `03-roadmap.md`).
   healthcheck only gates `depends_on: condition: service_healthy` — so this choice affects
   startup ordering, not runtime restarts.
   *Source:* R11, R14, `CLAUDE.md` §6, 1.1. *Answers:* Q11, Q12.
+
+- **6.7 Path prefix and versioning.** `[decided]`
+  *Decision:* **no prefix.** The paths are R1–R4's own — `/orders`, `/orders/{id}`,
+  `/orders/{id}/status`, `/drivers` — plus `/orders` for the list and `/health` (6.6). There is **no
+  versioning**, and its absence is a decision rather than an omission: a second version answers a
+  contract change, which nothing here anticipates, so it is not a Part 5 entry either.
+  *Why:* the brief writes the paths literally, and a prefix would make the delivered API differ from
+  the text a reviewer compares it against.
+  *Rejected:* `/api/v1` — the convention, buying a migration path for consumers that do not exist;
+  `/api` alone — the prefix's cost without its purpose.
+  *Source:* R1–R4, R19. *Constrains:* 9.4, 12.2, 13.1. *Realised in:* U7.
 
 - **6.8 Authentication.** `[decided]`
   *Decision:* **none.** Every endpoint is open. Recorded in the README under assumptions:
