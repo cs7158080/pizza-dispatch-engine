@@ -8,6 +8,7 @@ nothing here knows a code. Errors describing a failed port live beside that port
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 if TYPE_CHECKING:
     from pizza.domain.order import OrderStatus
@@ -20,3 +21,11 @@ class IllegalTransition(Exception):
         super().__init__(f"cannot move from {current.value} to {requested.value}")
         self.current = current
         self.requested = requested
+
+
+class OrderNotFound(Exception):
+    """No order carries this identifier. The API maps this to 404."""
+
+    def __init__(self, order_id: UUID) -> None:
+        super().__init__(f"no order with id {order_id}")
+        self.order_id = order_id
