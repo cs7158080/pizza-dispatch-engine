@@ -2183,7 +2183,18 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 9 — CLI
 
-- **9.2 Menu actions.** `[decided]`
+- **9.2 Menu actions.** `[decided]` · **reopen requested for U12's gate, 2026-08-12**
+
+  **The developer has asked to re-decide the status action.** The record below stands and
+  governs until U12's gate revisits it — this is a request to re-open, not a repeal, and no
+  other unit is affected: the core takes a requested status and decides, and does not care who
+  chose it or how. What is reopened is the fourth action alone — whether the CLI offers all five
+  status values, or a single "advance" that moves the order to the next one.
+  *What any new form has to answer, because neither objection has gone away:* it must not put
+  5.1's transition sequence inside the client, which 3.6 forbids in one sentence; and it must
+  leave the `409` path reachable from the interface a reviewer is handed, or 5.2 becomes
+  something read about rather than demonstrated.
+
   *Decision:* five actions —
   1. place an order
   2. register a driver
