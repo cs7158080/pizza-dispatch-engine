@@ -1,4 +1,4 @@
-"""The order: its fields, its status lifecycle, and what a transition reports back.
+"""The order: its fields, its status lifecycle, and what a transition reports.
 
 Identity and time arrive as arguments; the entity reaches for neither.
 """
@@ -12,6 +12,8 @@ from pizza.domain.errors import IllegalTransition
 
 
 class OrderStatus(Enum):
+    """The stages of an order, in the only sequence they may be reached."""
+
     RECEIVED = "RECEIVED"
     PREPARING = "PREPARING"
     BAKING = "BAKING"
@@ -20,14 +22,16 @@ class OrderStatus(Enum):
 
 
 class AssignmentState(Enum):
-    PENDING = "PENDING"
-    ASSIGNED = "ASSIGNED"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
+    """Whether a driver is coming, independently of how far the order has got."""
+
+    PENDING = "PENDING"  # no driver yet, which is where every order starts
+    ASSIGNED = "ASSIGNED"  # a driver took it
+    COMPLETED = "COMPLETED"  # a driver took it and it was delivered
+    FAILED = "FAILED"  # no driver was found before the retries ran out
 
 
-# The whole legal graph: only the adjacent status is reachable, and DELIVERED is
-# terminal because it has no entry.
+# The whole legal graph: only the adjacent status is reachable. DELIVERED is
+# terminal because it is not a key here.
 _NEXT = {
     OrderStatus.RECEIVED: OrderStatus.PREPARING,
     OrderStatus.PREPARING: OrderStatus.BAKING,
@@ -51,6 +55,8 @@ class Order:
     address: str
     items: list[str]
     status: OrderStatus
+    # Two views of one dispatch: `driver_id` is who took the order and is never
+    # cleared, `assignment_state` is how that attempt ended.
     assignment_state: AssignmentState
     driver_id: UUID | None
     assigned_at: datetime | None
@@ -65,7 +71,10 @@ class Order:
         items: list[str],
         now: datetime,
     ) -> "Order":
-        """Build a fresh order. The generated constructor rebuilds a stored one."""
+        """Build a freshly placed order.
+
+        Loading a stored one calls the dataclass constructor with all nine fields.
+        """
         return cls(
             id=id,
             customer_name=customer_name,
@@ -79,11 +88,15 @@ class Order:
         )
 
     def advance_to(self, requested_status: OrderStatus) -> TransitionResult:
-        """Move one step forward, or raise IllegalTransition."""
+        """Move the order one step forward, or raise `IllegalTransition`.
+
+        Returns the two facts the caller must act on: whether to publish, and
+        whether to release the assigned driver.
+        """
         if _NEXT.get(self.status) is not requested_status:
             raise IllegalTransition(self.status, requested_status)
         self.status = requested_status
-        # FAILED records that dispatch gave up and is not overwritten by delivery.
+        # FAILED is the only record that dispatch gave up, so delivery leaves it.
         if (
             self.status is OrderStatus.DELIVERED
             and self.assignment_state is not AssignmentState.FAILED
@@ -95,17 +108,25 @@ class Order:
         )
 
     def can_be_assigned(self) -> bool:
-        """No driver yet, and not delivered."""
+        """Report whether a driver may still be given to this order.
+
+        The second clause is not redundant: a retrying event can arrive after
+        delivery, and assigning then would mark a driver busy past the only
+        transition that ever releases them.
+        """
         return self.driver_id is None and self.status is not OrderStatus.DELIVERED
 
     def assign_to(self, driver_id: UUID, now: datetime) -> None:
-        """Record the assignment. The caller asks can_be_assigned() first."""
+        """Record which driver took the order, and when.
+
+        There is no guard here; the caller asks `can_be_assigned` first.
+        """
         self.driver_id = driver_id
         self.assignment_state = AssignmentState.ASSIGNED
         self.assigned_at = now
 
     def mark_dispatch_failed(self) -> None:
-        """Record that no driver was found. Ignored once the order has moved on."""
+        """Record that no driver was found, unless the order has moved on."""
         if not self.can_be_assigned():
             return
         self.assignment_state = AssignmentState.FAILED

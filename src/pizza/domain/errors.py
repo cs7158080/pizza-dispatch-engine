@@ -1,7 +1,7 @@
 """Business errors: outcomes the rules refuse.
 
-The API maps each to a status code; nothing here knows a code. Errors describing a failed
-port live beside that port, in `application/ports.py`.
+The API maps each to a status code; nothing here knows a code. An error
+describing a failed port lives beside that port, in `application/ports.py`.
 """
 
 from __future__ import annotations

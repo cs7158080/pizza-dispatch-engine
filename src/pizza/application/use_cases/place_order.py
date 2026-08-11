@@ -1,4 +1,4 @@
-"""Create an order and store it."""
+"""Placing an order."""
 
 from uuid import UUID, uuid4
 
@@ -12,6 +12,7 @@ class PlaceOrder:
         self._clock = clock
 
     def __call__(self, customer_name: str, address: str, items: list[str]) -> UUID:
+        """Store a new order and return its identifier."""
         order = Order.new(
             id=uuid4(),
             customer_name=customer_name,

@@ -57,9 +57,10 @@ def test_the_lifecycle_walks_forward_once_per_step() -> None:
 def test_skipping_reversing_and_repeating_are_all_refused() -> None:
     """The three illegal shapes, and what the error carries.
 
-    A skip would make delivery without dispatch a supported path; a repeat that succeeded
-    would publish ORDER_READY twice for one transition. The error names both statuses
-    because an API that cannot name them turns a rule failure into an opaque conflict.
+    A skip would make delivery without dispatch a supported path; a repeat that
+    succeeded would publish ORDER_READY twice for one transition. The error names
+    both statuses because an API that cannot name them turns a rule failure into
+    an opaque conflict.
     """
     skipping = _an_order()
     with pytest.raises(IllegalTransition) as refused:

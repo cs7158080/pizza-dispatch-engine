@@ -1,4 +1,4 @@
-"""Register a driver."""
+"""Registering a driver."""
 
 from uuid import UUID, uuid4
 
@@ -12,6 +12,7 @@ class RegisterDriver:
         self._clock = clock
 
     def __call__(self, name: str) -> UUID:
+        """Store a newly registered driver and return their identifier."""
         driver = Driver.new(id=uuid4(), name=name, now=self._clock.now())
         with self._uow as uow:
             uow.drivers.add(driver)

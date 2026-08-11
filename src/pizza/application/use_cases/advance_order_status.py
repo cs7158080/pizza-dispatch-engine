@@ -1,8 +1,8 @@
-"""Move an order one step, and act on what the transition reports.
+"""Moving an order forward, and acting on what the transition reports.
 
-The event is published only after the transaction commits, so no database lock is held
-across a call to the broker. The accepted cost is a lost event, which the outbox row
-records by staying unpublished.
+The event is published only after the transaction commits, so no database lock
+is held across a call to the broker. The accepted cost is a lost event, which
+the outbox row records by staying unpublished.
 """
 
 import logging
@@ -31,6 +31,11 @@ class AdvanceOrderStatus:
         self._publisher = publisher
 
     def __call__(self, order_id: UUID, requested_status: OrderStatus) -> Order:
+        """Move the order to the requested status and return it.
+
+        Raises `OrderNotFound`, or `IllegalTransition` when the requested status
+        is not the adjacent one.
+        """
         now = self._clock.now()
         event: OrderReadyEvent | None = None
 
@@ -39,7 +44,7 @@ class AdvanceOrderStatus:
             if order is None:
                 raise OrderNotFound(order_id)
 
-            result = order.advance_to(requested_status)  # raises IllegalTransition
+            result = order.advance_to(requested_status)
             uow.orders.save(order)
 
             if result.releases_driver and order.driver_id is not None:
@@ -66,8 +71,8 @@ class AdvanceOrderStatus:
         try:
             self._publisher.publish(event)
         except PublishFailed:
-            # The status change is already durable, so the caller still succeeds. The
-            # unpublished row names which order lost its dispatch.
+            # The status change is already durable, so the caller still succeeds.
+            # The unpublished row names which order lost its dispatch.
             logger.error(
                 "publish failed for order %s, event %s", event.order_id, event.event_id
             )
@@ -78,6 +83,6 @@ class AdvanceOrderStatus:
                 uow.outbox.mark_published(event.event_id, self._clock.now())
                 uow.commit()
         except OutboxWriteFailed:
-            # Nothing reads unpublished rows, so this costs a row that understates what
-            # happened rather than any behaviour.
+            # Nothing reads unpublished rows, so this costs a row that
+            # understates what happened rather than any behaviour.
             logger.error("could not mark event %s published", event.event_id)

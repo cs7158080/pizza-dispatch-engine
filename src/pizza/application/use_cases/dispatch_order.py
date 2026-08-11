@@ -1,8 +1,7 @@
-"""Assign a driver to an order, at most once.
+"""Assigning a driver to an order, at most once.
 
-The caller maps the outcome to an acknowledgement; no broker vocabulary belongs here.
 Two events are published per order, so a second arrival is expected rather than
-exceptional -- the guard below is what makes it harmless.
+exceptional — the guard below is what makes it harmless.
 """
 
 from enum import Enum
@@ -13,9 +12,11 @@ from pizza.domain.errors import OrderNotFound
 
 
 class DispatchOutcome(Enum):
-    ASSIGNED = "ASSIGNED"
-    NOTHING_TO_DO = "NOTHING_TO_DO"
-    NO_DRIVER_AVAILABLE = "NO_DRIVER_AVAILABLE"
+    """What an attempt did, for the caller to turn into an acknowledgement."""
+
+    ASSIGNED = "ASSIGNED"  # a driver was given the order
+    NOTHING_TO_DO = "NOTHING_TO_DO"  # already assigned, or already delivered
+    NO_DRIVER_AVAILABLE = "NO_DRIVER_AVAILABLE"  # nobody free — worth retrying
 
 
 class DispatchOrder:
@@ -24,11 +25,15 @@ class DispatchOrder:
         self._clock = clock
 
     def __call__(self, order_id: UUID) -> DispatchOutcome:
+        """Give the order a driver if it still needs one.
+
+        Raises `OrderNotFound`.
+        """
         with self._uow as uow:
             order = uow.orders.get(order_id)
             if order is None:
-                # The event is written in the same transaction as the order, so this is
-                # a broken invariant rather than a race.
+                # The event is written in the same transaction as the order, so
+                # this is a broken invariant rather than a race.
                 raise OrderNotFound(order_id)
 
             if not order.can_be_assigned():
@@ -38,8 +43,8 @@ class DispatchOrder:
             if driver is None:
                 return DispatchOutcome.NO_DRIVER_AVAILABLE
 
-            # The driver's status and the order's assignment are written together or
-            # not at all, which one transaction is what enforces.
+            # The driver's status and the order's assignment are written
+            # together or not at all, which one transaction is what enforces.
             driver.mark_busy()
             order.assign_to(driver.id, self._clock.now())
             uow.drivers.save(driver)
@@ -51,8 +56,8 @@ class DispatchOrder:
     def give_up(self, order_id: UUID) -> None:
         """Record that no driver was found, once the retry budget is spent.
 
-        The caller counts the attempts. The entity ignores this if the order has since
-        been assigned or delivered.
+        The caller counts the attempts. The entity ignores this if the order has
+        since been assigned or delivered. Raises `OrderNotFound`.
         """
         with self._uow as uow:
             order = uow.orders.get(order_id)

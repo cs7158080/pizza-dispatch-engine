@@ -412,6 +412,13 @@ No step depends on a step after it, and no step needs a file a later step create
   obligation:** `mark_published` raises `OutboxWriteFailed`, so the adapter converts its
   database library's exception rather than letting it through — the same duty U6 owes
   `PublishFailed`, and the reason `application/` never imports that library.
+  **And the check that must outlive this plan:** §4's `grep` belongs to U3 and stops running
+  when this branch merges, yet `infrastructure/` is the first code able to break 3.1's rule at
+  all. U5 turns it into a lint rule — ruff's `TID251` banning `sqlalchemy`, `pika`, `fastapi`
+  and `pydantic`, with `per-file-ignores` lifting the ban for `infrastructure/`, `entrypoints/`,
+  `config.py` and `tests/`. It is not configured here because nothing today could violate it,
+  and per-file ignores naming directories that do not exist are configuration written ahead of
+  its subject.
 - **U6 (7.3):** `OrderReadyEvent` is importable from `pizza.application.events`, its
   `EVENT_TYPE` is a `ClassVar` rather than a field, and its three fields are `UUID`, `UUID`,
   `datetime`. `serialize` and `deserialize` take and return `bytes`, and neither may import

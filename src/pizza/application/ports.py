@@ -17,7 +17,7 @@ from pizza.domain.order import Order
 
 class Clock(Protocol):
     def now(self) -> datetime:
-        """Timezone-aware UTC."""
+        """Return the current time, timezone-aware and in UTC."""
         ...
 
 
@@ -29,7 +29,7 @@ class OrderRepository(Protocol):
     def save(self, order: Order) -> None: ...
 
     def list_all(self) -> list[Order]:
-        """Every order, newest first."""
+        """Return every order, newest first."""
         ...
 
 
