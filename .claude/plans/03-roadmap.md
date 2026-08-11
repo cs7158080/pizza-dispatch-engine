@@ -215,7 +215,9 @@ recorded.
      exhaustion scenario (F7) cost seconds instead of the ~60 s that 1.2's human-paced floor
      imposes. There is one `TTL × cap` product, the wait queue's TTL is a queue-level property
      (8.2) rather than a per-consumer one, and the demo and the suite pull that single number in
-     opposite directions. *The cost is not small:* the suite would stop exercising the
+     opposite directions. 10.4 holds the shipped pair — 8 s × 8 redeliveries, a 64 s budget — and
+     names this entry as the only condition under which the cap could drop.
+     *The cost is not small:* the suite would stop exercising the
      configuration that ships, so a wrong retry budget in the delivered environment would pass
      green.
   2. **Named volumes for the demo environment.** 11.7's sole justification is the shared driver
