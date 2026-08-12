@@ -373,8 +373,14 @@ column stores the structure, and the bytes it is parsed from come from the one p
 `created_at` per R-e, `published_at` null. It does not commit; 7.5 requires the row and
 the status change to be one transaction, and the commit is the use case's.
 
-`mark_published(event_id, now)` issues the `UPDATE`, translates `SQLAlchemyError` to
-`OutboxWriteFailed` per R-c, and raises the same error when no row matched, per R-d.
+`mark_published(event_id, now)` reads the row and sets `published_at`, translates
+`SQLAlchemyError` to `OutboxWriteFailed` per R-c, and raises the same error when the row is not
+there, per R-d. **The `UPDATE` itself leaves with the transaction rather than being flushed here**,
+which is the developer's call and is recorded in `docs/ai-log.md`: a write that fails at the commit
+raises out of `commit()`, where the caller catches nothing, so that window returns a `500` for a
+request whose status change and publish both succeeded. It stays open because closing it here buys
+one narrow case and starts a pattern — the next step is translating `commit()`, then `__exit__` —
+and the whole question of what `commit()` may raise belongs to U7's gate.
 
 This is the step that imports `broker/serialization.py` from `db/` — the edge commit A wrote into
 7.3.

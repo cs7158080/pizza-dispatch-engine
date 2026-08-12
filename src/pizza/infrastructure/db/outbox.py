@@ -43,8 +43,5 @@ class SqlAlchemyOutboxStore(OutboxStore):
                 # absence is a broken invariant rather than a race.
                 raise OutboxWriteFailed(f"no outbox row for event {event_id}")
             row.published_at = now
-            # Flushed here so that a write failure is reported by this method,
-            # which is the only place the caller catches one.
-            self._session.flush()
         except SQLAlchemyError as error:
             raise OutboxWriteFailed(f"could not mark event {event_id}") from error
