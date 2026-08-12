@@ -459,6 +459,18 @@ and Part 4 of `03-roadmap.md`).
   disagree about the same file, and a `line-length` this item never chose would be forced. `E4`,
   `E7` and `E9` named individually do not contain `E501`, which is why the corrected form is not
   that rejected one.
+  *`E501` selected on 2026-08-12, reversing the last sentence above.* The paragraph is kept
+  because the rest of it holds; what it got wrong is treating the two commands as contradicting
+  each other when they **divide the work**. `ruff format` owns code layout and already imposes 88
+  columns on everything it can reformat, so the `line-length` this item believed it never chose
+  has been in force from the first commit. `E501` covers only what the formatter will not touch —
+  strings, URLs, comments and docstrings — and three of those four are ours to write short.
+  *What forced it:* twenty docstring lines written during U3 sat between 89 and 94 columns and no
+  command noticed; a review did. This item chose `select` for "the property that does not decay",
+  and that was decay.
+  *The accepted cost is the one the rejection named, unchanged:* a URL or string literal that
+  genuinely cannot be shortened has no automatic fix and takes a `# noqa: E501`. The repository
+  holds none today, and the rule set is now `E4`, `E7`, `E9`, `E501`, `F`, `I`.
   **Ruff's file scope excludes Markdown**, written as `extend-exclude = ["*.md"]` under
   `[tool.ruff]`. Ruff 0.16 formats fenced `python` blocks inside `.md` files by default, so
   `ruff format --check .` — one of 14.7's four commands — fails on this file's pseudo-code
@@ -872,9 +884,11 @@ and Part 4 of `03-roadmap.md`).
       def save(self, driver: Driver) -> None: ...
       def claim_next_available_driver(self) -> Driver | None: ...   # 8.9 locks, 5.4 orders
 
+  class OutboxWriteFailed(Exception): ...
+
   class OutboxStore(Protocol):
       def add(self, event: OrderReadyEvent) -> None: ...
-      def mark_published(self, event_id: UUID, now: datetime) -> None: ...
+      def mark_published(self, event_id: UUID, now: datetime) -> None: ...   # raises it
 
   class PublishFailed(Exception): ...
 
@@ -905,6 +919,23 @@ and Part 4 of `03-roadmap.md`).
   event is marked published. `PublishFailed` sits beside its port, not in `domain/errors.py` —
   an unreachable broker is not a violated rule. The use case catches it, not the router, since
   7.6 returns `200` either way.
+
+  *`OutboxWriteFailed`, added 2026-08-11 — the same reason, and the pattern was already in this
+  item.* The line below fixes that a failed `mark_published` is "logged, not raised" and leaves
+  its **type** unnamed, which leaves the use case with `except Exception`. That is the broad
+  swallowing `CLAUDE.md` §6 rejects, and here it is worse than untidy: a bug of ours lands in the
+  same net and leaves a row asserting the event was lost when it was published, so the record 7.5
+  built precisely to be trusted would lie. A narrower catch is unavailable in `application/` by
+  construction — the exception actually raised belongs to a database library 3.1 forbids this
+  layer to import — so the type is declared here and U5's adapter translates into it, exactly as
+  U6's does for `PublishFailed`. Found while writing U3's plan.
+  *The placement rule the two now share, stated so it is not read as habit:* an error naming a
+  **port's** failure lives beside that port. `domain/errors.py` holds business outcomes, which
+  cross every layer to the client and are enumerated by one registered handler (5.2, 3.1); a port
+  error travels one layer inward and stops, and each has exactly one call site that catches it by
+  name. **The condition that would change it:** an application-layer error caught in more than one
+  place, or something needing to enumerate them, earns `application/errors.py`. Neither holds
+  today, and a file grouping two unrelated exceptions for tidiness would have no reader.
 
   *One line each:* 7.5 publishes after the commit, so `mark_published` runs in a second
   transaction and **the `UnitOfWork` must be re-enterable**, each `__enter__` opening a fresh
@@ -1499,14 +1530,14 @@ and Part 4 of `03-roadmap.md`).
       @classmethod
       def new(cls, id, customer_name, address, items, now) -> "Order"   # sets RECEIVED / PENDING
 
-      def advance_to(self, to: OrderStatus) -> TransitionResult:
-          if _NEXT.get(self.status) is not to:
-              raise IllegalTransition(self.status, to)                  # 5.2 → 409
-          self.status = to
-          if to is DELIVERED and self.assignment_state is not FAILED:
+      def advance_to(self, requested_status: OrderStatus) -> TransitionResult:
+          if _NEXT.get(self.status) is not requested_status:
+              raise IllegalTransition(self.status, requested_status)    # 5.2 → 409
+          self.status = requested_status
+          if self.status is DELIVERED and self.assignment_state is not FAILED:
               self.assignment_state = COMPLETED
-          return TransitionResult(must_publish=to in (BAKING, READY),
-                                  releases_driver=to is DELIVERED)
+          return TransitionResult(must_publish=self.status in (BAKING, READY),
+                                  releases_driver=self.status is DELIVERED)
 
       def can_be_assigned(self) -> bool     # driver_id is None and status is not DELIVERED — 5.5
       def assign_to(driver_id, now) -> None # writes driver_id, ASSIGNED and assigned_at together
@@ -1563,6 +1594,12 @@ and Part 4 of `03-roadmap.md`).
   *`FAILED` is not terminal:* R5 publishes twice, so `FAILED → ASSIGNED` occurs on an ordinary path.
   Corrected in 4.4 and 7.6.
 
+  *The transition parameter is `requested_status`, renamed 2026-08-12 — a name and nothing else.*
+  It read `to`, which is clear beside the method's own name and vague everywhere else: the use
+  case, the API edge and `IllegalTransition` were carrying three names for one value. `requested`
+  is the accurate word rather than `next`, because a caller may ask for a status that is not the
+  adjacent one — that path is 5.2's whole subject, and 9.2 makes it the ordinary case at the CLI.
+  The signature, the guards and the behaviour are untouched. Found by review of U3's code.
   *Source:* R1, R4, `CLAUDE.md` §2, §3. *Constrained by:* 2.5, 3.2, 4.2–4.4, 4.7, 4.8, 5.1–5.6, 8.1,
   8.3. *Narrows:* 4.4. *Voids one argument in:* 7.6. *Realised in:* U3.
 
@@ -1698,7 +1735,10 @@ and Part 4 of `03-roadmap.md`).
   provable with zero setup and A17 already put them outside R18's count, so declining them forfeits
   §5's demonstration and saves nothing.
   *Source:* `CLAUDE.md` §5. *Constrained by:* 3.2, 3.5, 4.9, 8.9, 12.2. *Constrains:* 12.6.
-  *Realised in:* U4.
+  *Realised in:* **U3 for the rules it writes** — §8.2 gives every step a test that would fail when
+  its behaviour breaks, and these are exactly the free ones — **and U4 for whatever 12.6 opens
+  beyond them.** The same ordering 14.7 recorded when the `pytest` row moved from U4 to U2: U4 is
+  the unit named for `tests/unit/`, and the unit that writes the rule gets there first.
 
 - **5.8 Driver capacity — how many orders one driver can carry.** `[decided]`
   *Added during Phase 2*, because it had been settled implicitly rather than decided. R8 says
@@ -2352,7 +2392,18 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 9 — CLI
 
-- **9.2 Menu actions.** `[decided]`
+- **9.2 Menu actions.** `[decided]` · **reopen requested for U12's gate, 2026-08-12**
+
+  **The developer has asked to re-decide the status action.** The record below stands and
+  governs until U12's gate revisits it — this is a request to re-open, not a repeal, and no
+  other unit is affected: the core takes a requested status and decides, and does not care who
+  chose it or how. What is reopened is the fourth action alone — whether the CLI offers all five
+  status values, or a single "advance" that moves the order to the next one.
+  *What any new form has to answer, because neither objection has gone away:* it must not put
+  5.1's transition sequence inside the client, which 3.6 forbids in one sentence; and it must
+  leave the `409` path reachable from the interface a reviewer is handed, or 5.2 becomes
+  something read about rather than demonstrated.
+
   *Decision:* five actions —
   1. place an order
   2. register a driver

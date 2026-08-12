@@ -34,10 +34,10 @@ is fixed by 14.4).
 |---|---|---|---|---|
 | **U1** Foundation | Repository skeleton, package layout, dependency management, formatter/linter/type-checker config, `.gitignore` verification, `docs/ai-log.md` | 1, 2.8–2.10, 3.1, 3.3, 13.5, 14 | — | all |
 | **U2** Configuration | Typed settings object, `.env.example`, config validation at startup | 10 | U1 | U5, U6, U7, U8, U9 |
-| **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces, the `ORDER_READY` event type. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7–4.9, 5 | U1 | U4, U5, U6, U7, U8 |
+| **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces, the `ORDER_READY` event type. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7–4.9, 5, 7.2 | U1 | U4, U5, U6, U7, U8 |
 | **U4** Core unit tests | Unit tests for the rules identified as infrastructure-free | 5.7, 12.6, 12.7 | U3 | — |
 | **U5** Persistence | Schema creation (4.6), repository implementations, the `outbox` table and its insert/mark-published operations (7.5), integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 7.5, 8.9 | U2, U3 | U7, U8 |
-| **U6** Broker adapter | Topology declaration, event serialization (7.3), publisher implementation, connection lifecycle | 2.1, 2.7, 7 | U2, U3 | U7, U8 |
+| **U6** Broker adapter | Topology declaration, event serialization (7.3), publisher implementation, connection lifecycle | 2.1, 2.7, 7.1, 7.3–7.7 | U2, U3 | U7, U8 |
 | **U7** API service | Routes, edge validation, error format, status-update endpoint including the publish trigger, wiring of core + repositories + publisher | 2.3, 2.4, 6, 7.5, 7.6 | U3, U5, U6 | U9, U12 |
 | **U8** Dispatch worker | Consumer loop, ack/nack policy, retry and dead-letter handling, poison-message handling, dispatch logging, startup/shutdown | 8 | U3, U5, U6 | U9 |
 | **U9** Compose environment | Dockerfiles, compose services, healthchecks and readiness ordering, volumes, ports, restart policies | 3.7, 11.1, 11.2, 11.7–11.11 | U7, U8 | U10, U11 |
