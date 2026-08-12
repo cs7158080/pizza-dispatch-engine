@@ -20,7 +20,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1–2.10 | — |
 | 3 — Architecture and layering | 3.1–3.8 | — |
-| 4 — Data model | 4.1, 4.2, 4.3, 4.4, 4.7, 4.8, 4.9 | 4.5, 4.6 |
+| 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
 | 7 — Broker contract | 7.1–7.7 | — |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **80** | **30** |
+| **Total** | **82** | **28** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -630,7 +630,7 @@ and Part 4 of `03-roadmap.md`).
   | Conditional | Decided by | Unit | Outcome |
   |---|---|---|---|
   | `pydantic-settings` | 10.2 — a typed settings object or raw environment reads | U2 | **dropped.** 10.2 chose `pydantic` alone, so no dependency is added and neither lock file changes |
-  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | still open; neither alternative needs a dependency, and the line is dropped if either is chosen |
+  | `alembic` | 4.6 — migration tool, `create_all` at startup, or an init script | U5 | **dropped.** 4.6 chose `create_all` from a one-shot service, so no dependency is added and neither lock file changes |
 
   They enter `pyproject.toml` in the same commit as the decision that requires them, and
   `uv pip compile` is re-run. **"Not incremental" governs the act of approval, not the file being
@@ -649,7 +649,7 @@ and Part 4 of `03-roadmap.md`).
   *Carried forward to 11.9:* `psycopg[binary]` has no musl wheel, so an Alpine base breaks this
   list. 2.5 recorded it; it is repeated here because the list is where it will be read.
   *Source:* `CLAUDE.md` §6. *Constrained by:* 2.3, 2.5, 2.6, 2.7, 2.8, 2.9, 3.6, 3.7, 12.3.
-  *Constrains:* 11.9. *Conditional on:* 4.6 — 10.2 closed its line by declining it.
+  *Constrains:* 11.9. *Both conditional lines are now closed, each by declining:* 10.2 and 4.6.
   *Realised in:* U1.
 
 
@@ -674,14 +674,15 @@ and Part 4 of `03-roadmap.md`).
   │                            register_driver · dispatch_order — one file each
   │
   ├── infrastructure/       # layer 3, driven — imports: application, domain, libraries
-  │   ├── db/                  models, repositories, unit of work, outbox, migrations
+  │   ├── db/                  models, repositories, unit of work, outbox, schema creation (4.6)
   │   ├── broker/              publisher, topology declaration
   │   └── clock.py             SystemClock
   │
   └── entrypoints/          # layer 3, driving — imports: application; wires only at main.py
       ├── api/                 main · deps · schemas · errors · routers/{orders,drivers,health}
       ├── worker/              main · consumer
-      └── cli/                 3.6
+      ├── cli/                 3.6
+      └── schema/              main — the one-shot schema creator (4.6)
   ```
 
   *The rule, written so it can be checked in a diff:* **no module under `domain/` or
@@ -1210,6 +1211,214 @@ and Part 4 of `03-roadmap.md`).
   **`COMPLETED` is not written unconditionally.** The transition into `DELIVERED` writes it unless the
   state is `FAILED`, which survives; the reasoning is 4.9's and is not restated here.
   *Source:* assignment §4. *Answers:* Q3.
+
+- **4.5 Uniqueness and integrity constraints.** `[decided]`
+  *Decision:* **three tables, two constraints that are not keys, and no index beyond the primary
+  keys and the one 8.9 requires.**
+
+  ```
+  orders
+    id                uuid         PK
+    customer_name     text         NOT NULL
+    address           text         NOT NULL
+    items             jsonb        NOT NULL
+    status            text         NOT NULL    CHECK — the five values of 5.1
+    assignment_state  text         NOT NULL    CHECK — the four values of 4.4
+    driver_id         uuid         NULL        → drivers.id
+    assigned_at       timestamptz  NULL
+    created_at        timestamptz  NOT NULL
+
+    UNIQUE (driver_id) WHERE assignment_state = 'ASSIGNED'             -- 8.9's backstop
+    CHECK  (assignment_state <> 'ASSIGNED'
+            OR (driver_id IS NOT NULL AND assigned_at IS NOT NULL))    -- 4.9's backstop
+
+  drivers                              outbox
+    id          uuid         PK          event_id      uuid         PK
+    name        text         NOT NULL    event_type    text         NOT NULL
+    status      text         NOT NULL    payload       jsonb        NOT NULL
+                CHECK — AVAILABLE|BUSY   created_at    timestamptz  NOT NULL
+    created_at  timestamptz  NOT NULL    published_at  timestamptz  NULL
+  ```
+
+  No `server_default` on any column: identity is generated in the application (4.7) and every
+  timestamp is one `Clock.now()` read (4.8, 7.2), so a database default would be a second clock
+  no test can control.
+
+  *The organising principle, and everything below follows from it:* **the schema enforces what a
+  single writer cannot guarantee for itself under concurrency. Every rule one writer can hold
+  stays in the layer that owns it.** Without it each line below is taste; with it, the two
+  constraints are the two places the application genuinely cannot be trusted alone.
+
+  *Why the uniqueness constraint is partial and not plain.* 4.4 never clears `driver_id`, so
+  `UNIQUE (driver_id)` would say a driver may carry one order in their entire history — it would
+  reject the second order of a driver who was correctly released, which is ordinary behaviour.
+  Conditioning it on `assignment_state = 'ASSIGNED'` is what 4.4 bought when it kept the two axes
+  independent, and 5.8 already writes it in this form.
+
+  *Why 4.9's backstop is one-directional, which is not the obvious shape.* The tempting form is
+  the biconditional — assigned exactly when there is a driver — and it is **false against a state
+  this design produces deliberately**: an order whose event was lost (7.5) reaches `DELIVERED`
+  having never been dispatched, and 4.9 writes `COMPLETED` on it with `driver_id` still null. The
+  implication that holds in every direction the design allows is the narrow one: `ASSIGNED` implies
+  a driver and a time. It was checked against all six reachable combinations, including
+  `FAILED → ASSIGNED`, which R5's second publish makes an ordinary path.
+
+  *Enum storage — `text` with a `CHECK`, not a native PostgreSQL `ENUM` type.* Three enum types
+  are three schema objects, and adding a value to one is `ALTER TYPE`, which does not compose with
+  the rest of the DDL inside a transaction — an operational cost for exactly the protection a
+  `CHECK` already gives. The `CHECK` also prints the legal values in `\d orders`, so the schema
+  documents itself to a reviewer reading it directly. 4.9 fixed a plain `Enum` with explicit string
+  values and had the mapper write `.value`, so the column holds that string and the repository owns
+  the conversion — no ORM-level enum type is involved in either direction.
+
+  *`items` as `jsonb`, and this is the most arbitrary line in the record.* `text[]` describes the
+  data more precisely and is equally well supported; `jsonb` wins only on there being one such type
+  in the schema rather than two, since `payload` needs it. Nothing reads `items` (4.2), so no query
+  distinguishes them.
+
+  *`payload` as `jsonb` — 7.3's recommendation, accepted on its own argument.* The single question
+  the table is ever asked is which orders lost their dispatch, and 7.2 gives the row no `order_id`
+  column of its own, so that question is `payload ->> 'order_id'` over rows with
+  `published_at IS NULL`. Byte-exactness has no consumer, and FW2's relay would rebuild the message
+  from the content.
+
+  *No `VARCHAR(n)`, anywhere.* 100 and 200 are 4.2's bounds and are enforced at the edge.
+  `CLAUDE.md` §3 puts a rule in exactly one place; a length written in the schema as well is the
+  same rule in two, and the copy that drifts is the one nothing exercises.
+
+  *One foreign key, and no second one.* `orders.driver_id → drivers.id`, with no `ON DELETE`
+  clause: nothing in the system deletes a driver, so the default — refuse — is the correct
+  behaviour rather than an unconsidered one. The outbox has no foreign key to `orders`: its link to
+  the order lives inside the payload, and a constraint there would make the evidence of a failure
+  depend on the row it is evidence about.
+
+  *No index beyond the primary keys and the constraint above.* Four candidates were weighed and all
+  four fail 1.1's ceiling test under 11.7's disposable environment, where the volume that would
+  justify an index never arrives: `orders(created_at)` for 6.6's newest-first list — FW4 already
+  holds the volume story; `drivers(status, created_at)` for 8.9's claim query — a handful of rows,
+  scanned; `orders(driver_id)` for driver history — FW3 is not built (A9), and the partial unique
+  index covers the assigned rows anyway; `outbox(published_at) WHERE published_at IS NULL` for a
+  relay that does not exist (A23).
+
+  *What the schema does not protect — and the three kinds of "not" are different, which is the
+  point of stating them together:*
+
+  | Not protected | Kind | Where the defence is |
+  |---|---|---|
+  | The ghost driver — `drivers.status = BUSY` with no `ASSIGNED` order | **Impossible.** No cross-table `CHECK` exists and 4.3 rejected a trigger | 4.3's single-transaction invariant, held by 3.5's `UnitOfWork` |
+  | An illegal status transition (5.1) | **Impossible.** A `CHECK` sees one row and never its previous value | `domain/`, where 4.9 put `_NEXT` |
+  | The bounds on `items`, `customer_name`, `address` (4.2) | **Possible, and forbidden** — `CLAUDE.md` §3, one rule one place | Edge validation (2.3) |
+  | That an outbox row was written at all | **Possible, and not worth it** — a constraint can forbid a row, never require one | Nothing. 12.3 already records this as the lowest-consequence failure in the design, because A23 gives the table no reader |
+
+  Collapsing these into one list of "things we chose not to constrain" would be the misleading
+  version: two of them were never available, one is available and would be a defect, and only the
+  fourth is a judgement about cost.
+
+  *Rejected:* **a native `ENUM` type per enum** — above. **`VARCHAR` bounded to 4.2's limits** —
+  above. **A biconditional `CHECK` on the assignment triple** — false against the `COMPLETED`
+  without a driver that 7.5's lost event produces. **`text[]` for `items`** — a near-tie, decided on
+  having one JSON type in the schema instead of two. **A `CHECK` on `outbox.event_type`** — one
+  legal value, written from a class constant (7.2). **Any of the four indexes** — above.
+  *Accepted cost:* the two constraints are the only automated defence 4.5 supplies, and neither is
+  loaded by the test suite — 12.3 fixed the suite at HTTP with no database client, so an integrity
+  violation would surface as a `500` rather than as a named assertion. The uniqueness constraint is
+  a last line of defence behind 8.9's row lock; it is expected never to fire.
+  *Source:* R8, DoD "Broker & Consumer". *Constrained by:* 4.1–4.4, 4.7–4.9, 5.1, 5.8, 7.2, 7.5,
+  8.9. *Accepts the recommendation of:* 7.3. *Realised in:* U5.
+
+- **4.6 Schema creation strategy.** `[decided]`
+  *Decision:* **`Base.metadata.create_all()`, run once by a one-shot Compose service, before any
+  other service starts.** No migration tool and no dependency.
+
+  ```
+  postgres                                    healthcheck is 11.2's
+      ↓  condition: service_healthy
+  schema        entrypoints/schema/main.py — builds the Engine, calls
+                infrastructure/db/schema.py:create_schema(engine), exits 0
+      ↓  condition: service_completed_successfully
+  api · worker · tests
+  ```
+
+  The service runs the `runtime` image with a different `command` — **no new image and no new
+  stage**, which is the arrangement 3.7 already recorded for FW2's relay. 11.1's service list
+  already reserves the slot ("any init/migration service"); this item fills it and fixes the
+  contract, while **11.1 wires it and 11.2 owns the healthcheck it waits on**.
+
+  *Verified before choosing, because otherwise the choice is forced rather than made:* every
+  constraint 4.5 decided is expressible in SQLAlchemy metadata — the partial unique index through
+  `postgresql_where`, the row-level `CHECK`, `jsonb`, `timestamptz`, the foreign key. Had one
+  required hand-written DDL, `create_all` would have been unavailable and this record would read
+  differently.
+
+  *Why a service of its own, and the race it removes is not hypothetical.* `create_all` inspects
+  the catalogue and then issues plain `CREATE TABLE` for what it did not find. Two processes that
+  both inspect before either creates therefore both proceed, and the loser gets "relation already
+  exists" — so running it from the api and the worker, which Compose starts together, is a genuine
+  race rather than a tidiness argument. **Stated at its real size:** the window is small and the
+  failure intermittent, which makes it worse than a deterministic one, not better — it would pass
+  every time it was tried here and fail on the reviewer's machine, inside the single command R15
+  is graded on.
+  *Why not "the api creates it and the worker waits":* 3.8 made them peers over one core. A
+  `worker → api` dependency is a hierarchy with no other reason to exist, and it would read as an
+  architectural claim rather than as a way around a race.
+
+  *What this also answers, which is half the item:* the inventory asks how a container behaves when
+  it starts before the database is ready. It does not start. If PostgreSQL is not healthy the
+  one-shot does not run; if schema creation fails, nothing downstream starts and the failure is one
+  service's non-zero exit rather than three services emitting connection errors at once, which is
+  the form that hides its own cause. **No step waits on a duration** — `CLAUDE.md` §5 forbids it,
+  and every edge above is a condition.
+
+  *Why not Alembic — and the argument is not 1.1's ceiling test.* That test governs delivered scope,
+  and applying it to build machinery is a mistake this record already made once and withdrew
+  (`docs/ai-log.md`, 2026-08-10). Alembic is neither scope nor hygiene: it is the operational
+  ability to change a schema that holds data which must survive the change. **11.7 removed the
+  object of that ability** — with no named volumes the schema is created from empty on every launch,
+  so there is never a second version and `versions/` would hold exactly one revision describing a
+  capability nothing uses. It also does not solve the ordering problem: `alembic upgrade head` needs
+  the same one-shot service from the same place, so the topology above is what either choice buys.
+  *What is given up, and it is not nothing:* a reviewer of a backend assignment may expect
+  migrations, and their absence can read as a shortcut rather than a decision. The README states it
+  as a trade-off with the condition that reverses it, and the reversal is cheap — `Base.metadata` is
+  already the single source, so `alembic revision --autogenerate` produces the first revision from
+  it (2.5). **FW16** holds the entry and the chain of preconditions behind it.
+
+  *Why not an init script in the image's `docker-entrypoint-initdb.d`.* It is the strongest
+  alternative on the axis this item is about: PostgreSQL runs it before it accepts external
+  connections, so there is no race, no extra service, and no ordering to design at all. It is
+  rejected on a different axis — the schema would be hand-written SQL beside the models that already
+  describe it, and **nothing would ever compare them**. 12.3 gives the suite no database client, so
+  the drift has no detector even in principle; and the script works only inside Compose, so a schema
+  created any other way is created by different code. One source of truth is worth more here than
+  the ordering it would have simplified.
+
+  *`entrypoints/schema/` is an entrypoint by the composition-root rule rather than by the
+  definition of a driving adapter,* and the record says so rather than blurring it: it drives no use
+  case and touches no `application/` module. It sits there because it must import `infrastructure/`
+  and 3.1 permits that in `main.py` files only.
+
+  *Two behaviours that follow, both worth writing so U5 does not choose:* `create_all` skips a table
+  it finds, so a second `up` after `Ctrl-C` — where the container keeps its filesystem (11.7) — is a
+  no-op rather than an error. **By the same mechanism it does not repair a partially created
+  schema**, which is safe only because 11.7 guarantees the two states are empty or complete.
+  And api, worker and tests do **not** check the schema for themselves:
+  `service_completed_successfully` is a hard guarantee, and a second check is one rule in two places.
+
+  *Rejected:* **Alembic** — above. **An init script** — above. **`create_all` in each service's
+  composition root** — the race. **`create_all` in the api alone** — the hierarchy. **The command
+  inline in `docker-compose.yml` as a `python -c`** — code in YAML, reachable by no test and by no
+  type checker.
+  *Corrects two texts that presupposed migrations:* 3.1's tree, where `db/` read "…, outbox,
+  migrations" and gains the fourth entrypoint; and Part 4's U5 row in `03-roadmap.md`, which read
+  "Schema and migrations". Both are narrowed in this change, as 4.7 narrowed 3.1's `ids.py` slot.
+  The inventory's own wording at 4.5 is left alone — a question is not rewritten once its answer is
+  known.
+  *Closes 2.10's second conditional line:* `alembic` is dropped exactly as that item provides for,
+  and neither lock file changes.
+  *Revisit if:* the environment stops being disposable. That is A19, and it reopens only through
+  FW13 — which is the chain **FW16** records.
+  *Source:* R14, R15. *Constrained by:* 2.5, 3.1, 3.7, 3.8, 4.5, 11.1, 11.2, 11.7, 12.3.
+  *Constrains:* 11.1. *Closes:* 2.10's conditional. *Deferred to:* FW16. *Realised in:* U5.
 
 - **4.7 Identifier scheme.** `[decided]`
   *Decision:* **UUID version 4, generated in the application layer and passed into the entity as

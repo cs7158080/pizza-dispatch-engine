@@ -36,7 +36,7 @@ is fixed by 14.4).
 | **U2** Configuration | Typed settings object, `.env.example`, config validation at startup | 10 | U1 | U5, U6, U7, U8, U9 |
 | **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces, the `ORDER_READY` event type. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7–4.9, 5, 7.2 | U1 | U4, U5, U6, U7, U8 |
 | **U4** Core unit tests | Unit tests for the rules identified as infrastructure-free | 5.7, 12.6, 12.7 | U3 | — |
-| **U5** Persistence | Schema and migrations, repository implementations, the `outbox` table and its insert/mark-published operations (7.5), integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 7.5, 8.9 | U2, U3 | U7, U8 |
+| **U5** Persistence | Schema creation (4.6), repository implementations, the `outbox` table and its insert/mark-published operations (7.5), integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 7.5, 8.9 | U2, U3 | U7, U8 |
 | **U6** Broker adapter | Topology declaration, event serialization (7.3), publisher implementation, connection lifecycle | 2.1, 2.7, 7.1, 7.3–7.7 | U2, U3 | U7, U8 |
 | **U7** API service | Routes, edge validation, error format, status-update endpoint including the publish trigger, wiring of core + repositories + publisher | 2.3, 2.4, 6, 7.5, 7.6 | U3, U5, U6 | U9, U12 |
 | **U8** Dispatch worker | Consumer loop, ack/nack policy, retry and dead-letter handling, poison-message handling, dispatch logging, startup/shutdown | 8 | U3, U5, U6 | U9 |
@@ -222,7 +222,8 @@ recorded.
      green.
   2. **Named volumes for the demo environment.** 11.7's sole justification is the shared driver
      pool, so isolation removes it and A19 reopens. Nothing asks for persistence, and it turns
-     `docker compose down` into `down -v`.
+     `docker compose down` into `down -v`. **This is also the only door to FW16**, which needs
+     data that survives a launch before a migration tool has anything to migrate.
 
   *What it would touch, if ever taken:* 11.6 rewritten; 11.3, 11.4, 11.5 and 11.7 materially
   affected; A8 and A19; steps 1 and 2 of 1.2's demo path; 12.3's reopen condition and 12.5's
@@ -251,3 +252,23 @@ recorded.
   *Recorded because the developer proposed it as groundwork for driver types:* that feature's rule
   belongs in `domain/` beside 5.4, and the dispatch use case already holds the order it loaded, so
   the groundwork is the database read rather than the message.
+
+- **FW16 — Schema migrations.** Alembic in place of 4.6's `create_all`: the schema becomes an
+  ordered chain of revisions, and changing it stops meaning recreating it.
+  *Why it is not in scope, stated as a missing object rather than as a saved dependency:* a
+  migration tool is the ability to change a schema **that holds data which must survive the
+  change**, and 11.7 leaves no such data — with no named volumes the schema is built from empty on
+  every launch, so there is never a second version. `versions/` would hold one revision describing
+  a capability nothing exercises.
+  *Its preconditions are a chain, and this is the entry's real content — recorded because the
+  developer traced it:* migrations need persistence, persistence needs A19 reopened, and A19
+  reopens only through **FW13's second point**, since 11.7 rests entirely on the shared driver pool
+  that an isolated test environment removes. Nothing shorter than that chain makes Alembic worth
+  its own file. The one route that bypasses it is deployment to an environment we do not recreate
+  from empty, which this assignment does not have.
+  *Cost when taken, and it is small by construction:* `Base.metadata` is already the single source
+  of the schema (2.5, 4.6), so `alembic revision --autogenerate` writes the first revision from it,
+  and the one-shot Compose service 4.6 defines changes its command and nothing else — the topology,
+  the ordering conditions and the image stay as they are.
+  *What it does not buy:* nothing about container startup order. 4.6 records that either choice
+  needs the same one-shot service in the same place.
