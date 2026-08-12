@@ -27,11 +27,11 @@ status markers, precisely so that this table cannot be contradicted.
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
-| 11 — Docker Compose | 11.1, 11.3–11.7 | 11.2, 11.8–11.11 |
+| 11 — Docker Compose | 11.1–11.7 | 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **83** | **27** |
+| **Total** | **84** | **26** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2799,6 +2799,109 @@ and Part 4 of `03-roadmap.md`).
   U9 by name.
   *Source:* R14, R15. *Constrained by:* 2.1, 2.2, 3.7, 4.6, 9.3, 10.1, 10.3, 11.3, 11.4.
   *Constrains:* 11.2, 11.9. *Realised in:* U9.
+
+- **11.2 Readiness and ordering.** `[decided]`
+  *Decision:* **Compose conditions alone. Nothing under `src/` waits for anything.** The inventory
+  offers healthchecks, in-app retry loops, or both; three records had already answered in three
+  places without anyone stating the rule — 9.6 writes no entrypoint script, 4.6's one-shot does not
+  wait because it is not started, and 8.8's worker exits rather than retrying. It is one rule and it
+  is written here: **readiness is a condition Compose evaluates, never a loop of ours.** 2.5's
+  `pool_pre_ping` is not an exception and that record says so — it replaces a connection that went
+  bad while idle, which is a different problem from starting up.
+
+  **Three healthchecks, on the infrastructure and the API.**
+
+  | Service | Test | Why this one |
+  |---|---|---|
+  | `postgres` | `pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"` | 6.6 named `pg_isready`; the `-h` is this item's |
+  | `rabbitmq` | `rabbitmq-diagnostics ping` | 6.6 |
+  | `api` | `python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"` | 6.6's `/health`, called with what is already in the image |
+
+  *Why `-h 127.0.0.1`, which is the finest detail in this item and the one that would have bitten.*
+  The postgres image runs a **temporary server during first initialisation**, started with no
+  external listener, and `pg_isready` reaching it over the local socket reports success. The
+  container would be marked healthy while the real server is not yet accepting connections — and
+  4.6's entire arrangement rests on the opposite, since the schema service connects over TCP from
+  another container and 4.6 gives it nothing to retry with. Forcing the check through TCP means it
+  answers the question the dependent service is actually asking. The user and database come from the
+  container's own environment (10.1), so a reviewer who overrides them does not break the check;
+  `$$` is Compose's escape for a literal `$`.
+  *Why the API's check is a `python -c` and not `curl`:* the base is `python:3.x-slim` (3.7), which
+  ships no `curl`. The alternative is a package in the image every service ships, added for a
+  diagnostic — against one line using the interpreter that is already the reason the image exists.
+  `urlopen` raises on 6.6's `503`, so the exit code needs no logic of ours.
+  *No healthcheck on `worker`* — 8.8 records that it speaks no HTTP and offers nothing to probe, and
+  a check invented for it would be a mechanism with one caller. *None on `schema` or `tests`* —
+  both are one-shot, and their readiness signal is the exit code.
+
+  **The graph.**
+
+  ```
+  postgres ──healthy──> schema ──completed 0──> api
+                                          └───> worker
+  rabbitmq ──healthy───────────────────────────> worker
+           └──healthy──────────────────────────> tests
+  api      ──healthy───────────────────────────> tests
+           └──healthy──────────────────────────> cli
+  ```
+
+  *The worker waits for the broker, which 8.8 handed here as legibility to be weighed.* Taken: the
+  restarts it prevents are not hypothetical — RabbitMQ takes tens of seconds to boot, and without
+  the edge the reviewer's **first** `up` prints a run of `ERROR` lines and a container with a restart
+  count, in the same stream 11.3 puts the PASS/FAIL summary in. That is the reasoning 11.7 already
+  used about a red suite at launch: the worst first impression is the one hardest to attribute
+  correctly. **It replaces nothing that 8.8 decided.** `depends_on` gates startup only, so a broker
+  that dies later is still answered by the exit and 11.11's policy, exactly as 8.8 specified — the
+  edge buys a clean first launch and gives up no resilience.
+  *The API does not wait for the broker, and the asymmetry is the design's own.* 7.1 declares the
+  topology from both sides precisely because that *"deletes the startup-ordering dependency rather
+  than managing it"*, and 6.6 made `/health` report the database alone on 7.6's ground that an API
+  without a broker serves every endpoint correctly. An edge here would contradict two records to buy
+  nothing, since everything that reads a dispatch result waits for the broker on its own account.
+  *The suite waits for the broker, and this is the edge that prevents a silent failure rather than
+  noise.* A22 is explicit: with the broker unreachable a `PATCH` still returns `200` and the event is
+  lost. A scenario running in that window would see a success, assert nothing wrong, and then fail
+  waiting for an assignment that was never requested — a red suite on a healthy system, reported at
+  the wrong place entirely.
+  *The suite does not wait for the worker, and nothing is lost by it.* The worker has no healthcheck
+  to wait on, and `service_started` would prove only that a process exists, not that it subscribed.
+  It is not needed: 7.1 has the publisher declare the topology, so the queue exists when the API
+  publishes, and a message published before the worker subscribes waits in it.
+  *`tests` carries no direct edge to `schema`, though 4.6's diagram draws one.* The guarantee holds
+  transitively — `tests` waits on `api`, which cannot be healthy before it started, and it cannot
+  start before `schema` exited zero. What 4.6 requires is preserved; the redundant edge is a second
+  statement of it that could later disagree.
+  *`cli` waits on the API* (9.3 left `depends_on` here), so `docker compose run --rm cli` works
+  whether or not the stack is already up.
+
+  **The intervals.**
+
+  | | `interval` | `timeout` | `retries` | `start_period` |
+  |---|---|---|---|---|
+  | `postgres` | 5s | 5s | 12 | 10s |
+  | `rabbitmq` | 5s | 10s | 12 | 30s |
+  | `api` | 5s | 5s | 12 | 10s |
+
+  RabbitMQ gets the longer pair because `rabbitmq-diagnostics` starts an Erlang CLI, which is slow
+  both to boot and to answer. **None of these is the fixed wait `CLAUDE.md` §5 forbids:** each is the
+  cadence at which a condition is tested, and `start_period` is a window in which failures are not
+  counted — neither is an assumption that the system is ready after N seconds. Compose starts
+  everything the graph allows in parallel, so the waits overlap rather than sum.
+
+  **No `stop_grace_period` is written, for any service.** 8.8 handed it here and fixes that the
+  worker stops after the message in hand, which takes milliseconds — so the default is never reached
+  and a value here would be a number nothing derives. `stop_signal` on `postgres` is left alone on
+  the same ground: a slower shutdown costs a few seconds at `down`, and 11.7 discards the data
+  regardless.
+
+  *Rejected:* **an in-app wait loop** in any service — 9.6 already removed the entrypoint script that
+  would carry it, and it would put startup ordering in two places. **A healthcheck on the worker** —
+  no surface to probe. **`pg_isready` without `-h`** — above. **`curl` in the runtime image** —
+  above. **A direct `tests` → `schema` edge** — above.
+  *Assumption:* long-form `depends_on` conditions require Compose v2, as 9.3 assumed for `profiles`;
+  **11.10 confirms it**.
+  *Source:* R14, R15, `CLAUDE.md` §5. *Constrained by:* 2.5, 4.6, 6.6, 7.1, 7.6, 8.8, 9.3, 9.6,
+  10.1, 11.3, 11.7. *Holds:* 8.8's three hand-offs. *Constrains:* 11.10, 11.11. *Realised in:* U9.
 
 - **11.3 How the test suite is auto-executed.** `[decided]`
   *Decision:* a **one-shot test service** in compose that waits for the stack to be healthy
