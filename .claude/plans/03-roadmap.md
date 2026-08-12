@@ -275,3 +275,32 @@ recorded.
   the ordering conditions and the image stay as they are.
   *What it does not buy:* nothing about container startup order. 4.6 records that either choice
   needs the same one-shot service in the same place.
+
+- **FW17 — A bounded wait for the publisher confirm.** 7.7 feeds three `pika` parameters from
+  10.4's single timeout, and between them they bound every phase of a publish but the last. Once
+  the connection is established and the message is on the wire, the wait for the broker's confirm
+  is bounded only by the heartbeat mechanism. `pika`'s checker runs on the connection's I/O loop,
+  which **is** being serviced during that wait, and it aborts the stream after one check interval
+  with no bytes received — `heartbeat + 5` seconds, so about 65 s against RabbitMQ's default
+  60 s heartbeat, against the five seconds 10.4 configures. Read from `pika/heartbeat.py` in 1.4.4
+  rather than estimated.
+  *Why it cannot be repaired in place:* the calling thread is inside `pika` for the whole wait, so
+  no code of ours runs to check a clock; and a blocking socket call cannot be interrupted from
+  another thread without closing the socket underneath it, which 7.7 already records. The bound has
+  to come from somewhere the caller can wait **interruptibly**.
+  *Two routes, and they are not the same size.*
+  1. **A dedicated publisher thread with an internal queue** — `pika`'s own recommendation, already
+     rejected by 7.7 as machinery this scale does not justify. The request thread would wait on the
+     queue with a timeout instead of on the socket, and so be released on schedule. **It frees the
+     caller, not the resource:** the publisher thread stays stuck in the same call.
+  2. **FW12's asynchronous runtime** — the wait becomes an awaitable the event loop abandons at a
+     deadline, with nothing left behind. This closes it completely, and it is the second thing
+     FW12 buys the publisher after removing 7.7's lock.
+  *Why it is not in scope:* the failure it covers is a broker that accepts a connection and then
+  goes silent, which is distinct from the two 7.5 names — an unreachable broker and a stale
+  connection — and both of those the three parameters do bound. `Connection.Blocked`, the broker
+  announcing that it is stalled, is bounded too. What is left is silence without announcement.
+  Under 1.1's ceiling test no named DoD row degrades.
+  *What would trigger it:* taking FW12, which closes it as a side effect; or a broker that stops
+  being a container on the same Compose host, at which point a connection that establishes and then
+  stops answering is no longer exotic.

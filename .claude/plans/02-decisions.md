@@ -2238,16 +2238,34 @@ and Part 4 of `03-roadmap.md`).
   *What actually bounds the publish in time.* 7.5 promised a bounded attempt and a `PATCH` blocked
   for at most roughly twice it. **A timer of ours cannot deliver that:** a blocking socket call in
   Python cannot be interrupted from another thread without closing the socket underneath it. The
-  bound must come from the library's own parameters, both fields of `pika.ConnectionParameters`
-  and both fed from 10.4:
+  bound must come from the library's own parameters — **three** of them, all fed from 10.4's single
+  timeout and set on the `pika.Parameters` instance the adapter builds, which is a `URLParameters`
+  because 10.1 supplies one string:
 
   | Parameter | What it bounds |
   |---|---|
-  | `socket_timeout` | connection establishment and socket operations — a broker that does not answer |
+  | `socket_timeout` | the TCP connect alone — a host that does not answer |
+  | `stack_timeout` | the whole bring-up: TCP, then the AMQP handshake, then the channel |
   | `blocked_connection_timeout` | the broker signalling `Connection.Blocked` under memory or disk pressure; without it a publish waits **indefinitely**, a failure that presents as a hang rather than an error |
 
-  `connection_attempts` stays at its default of 1, so the bound remains one attempt and one
-  timeout; the worker's startup retries are a different question and belong to 8.8.
+  *`stack_timeout` was added on 2026-08-12, and the bound this record named was not the bound in
+  force without it.* The table read "both fields", giving `socket_timeout` "connection
+  establishment and socket operations". Checked against pika 1.4.4 rather than from memory:
+  `socket_timeout` is documented as the `socket.connect()` timeout, and the full stack bring-up is
+  bounded by `stack_timeout`, whose default is **15 s**. A broker completing the TCP connect and
+  then stalling the handshake would have held a `PATCH` for 30 s against the 10 s 7.5 promises —
+  the two differing by three times, in the one place this item exists to fix.
+
+  `connection_attempts` stays at its default of 1 — read from the library, not assumed — so the
+  bound remains one attempt and one timeout; the worker's startup retries are a different question
+  and belong to 8.8.
+
+  *What no parameter of ours bounds, filed as FW17 rather than accepted in silence:* the wait for a
+  publisher confirm on a connection that is established and then goes quiet. `basic_publish` polls
+  until the confirm arrives or the connection closes, so the ceiling there is the heartbeat
+  mechanism below rather than 10.4's timeout. It is a different failure from the two 7.5 names, and
+  closing it needs the dedicated publisher thread this item already rejected — which is why it is a
+  future-work entry and not a repair.
 
   *Heartbeats stay at `pika`'s default, and the reason is worth stating.* `BlockingConnection`
   services heartbeats only while the application is **inside** a `pika` call. An API that publishes
@@ -2283,7 +2301,7 @@ and Part 4 of `03-roadmap.md`).
   access by construction, so an async runtime needs no lock. That entry already records this from
   its side; this is the reference back.
   *Source:* R5, R10. *Constrained by:* 2.4, 2.7, 3.1, 3.4, 7.1, 7.3, 7.5, 7.6, 8.5.
-  *Constrains:* 8.4, 8.8. *Deferred to:* FW12. *Realised in:* U6, U8.
+  *Constrains:* 8.4, 8.8. *Deferred to:* FW12, FW17. *Realised in:* U6, U8.
 
 
 ## Topic 8 — Worker
