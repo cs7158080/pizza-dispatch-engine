@@ -24,14 +24,14 @@ status markers, precisely so that this table cannot be contradicted.
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
-| 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
+| 8 — Worker | 8.1–8.9 | — |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **87** | **23** |
+| **Total** | **90** | **20** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2668,6 +2668,73 @@ and Part 4 of `03-roadmap.md`).
   is not one.
   *Source:* R9, R17. *Answers:* Q6. *Defines:* F7. *Completed by:* 7.4.
 
+- **8.4 Poison message handling.** `[decided]`
+  *Decision:* **three classes of failure, two dispositions, and one decoding seam.**
+
+  | Class | Disposition |
+  |---|---|
+  | The bytes do not decode — `SerializationError` (7.3), malformed UTF-8 included | log at `ERROR` with the body, **`ack`**, drop |
+  | `OrderNotFound` — a well-formed event naming an order that is not in the database | log at `ERROR`, **`ack`**, drop |
+  | Any other exception | log at `ERROR` with the traceback, **`reject(requeue=false)`** into 8.2's cycle, **unbounded** |
+
+  *Why the first two drop — nearer to forced than chosen.* Neither is repairable by time, and
+  neither leaves anything to record: the `order_id` of an undecodable message is inside the bytes
+  that did not decode, and an order that is not there has no row to mark, so 8.3's `FAILED` is
+  unavailable and the log line is the whole record. `OrderNotFound` is a broken invariant rather
+  than a race — 7.5 writes the outbox row in the order's own transaction and publishes after the
+  commit.
+  *Rejected:* **a parking queue** — 8.3 declined one for the exhaustion path as invisible and
+  irrecoverable without FW5; here it is worse, since a parked message we cannot name an order for
+  has no reader at all.
+  *Accepted cost, recorded as A28:* the order stays `PENDING` with no `FAILED` marker. Bounded
+  rather than removed by two facts: R5 publishes twice per order, and the only producer is our own
+  `serialize`, so this class means a bug of ours or a hand-injected message.
+
+  *Why the third retries, and unbounded.* Its two populations — a transient infrastructure fault
+  and a bug of ours — are both repaired by something a person does, after which the message passes
+  and is acked. The cycle is self-healing and loud: one `ERROR` per TTL until somebody acts. The
+  exhaustion path is not a special case: with the database down, 8.3's `give_up()` raises into
+  this class and the message keeps circling until the database returns.
+  *Rejected:* **`ack` and drop** — a one-second database blip costs an order silently and
+  permanently, which is the failure 7.4 called *categorically worse*; this record does not reverse
+  that ranking one item later. **A bounded reject, dropping after N** — nothing derives N, and a
+  fault outlasting N × TTL still loses orders while consuming the ones behind them.
+  *Accepted cost:* every `reject` increments the same `x-death` entry 7.4 made the retry budget,
+  so a spell of exceptions shortens 10.4's 64-second demo floor. A second counter needs a header
+  of ours and a republish, both already rejected by 8.2 and 7.4.
+
+  *Can a poison message block the queue — the question the item was opened on.* **No.** 8.5 holds
+  one unacknowledged message at a time, and all three paths terminate inside the callback in an
+  `ack` or a `reject`.
+
+  *The seam, which 7.3 and 7.7 both left here.* 3.1 forbids `entrypoints/worker/consumer.py` to
+  import `infrastructure/`, so it can name neither `deserialize` nor `SerializationError`. One
+  function joins 7.3's pair in its module:
+
+  ```python
+  # infrastructure/broker/serialization.py
+  def deserialize_or_none(raw: bytes) -> OrderReadyEvent | None:   # None on SerializationError
+  ```
+
+  `entrypoints/worker/main.py` injects it as a `Callable[[bytes], OrderReadyEvent | None]`; the
+  consumer holds the `pika` callback, logs the poison line from the body it already has, and acks.
+  The `except` names one declared type and converts it to a value the signature forces every caller
+  to handle, so a bug of ours passes through it into the third class rather than being swallowed.
+  *What the consumer may import, since the arrangement rests on it:* 3.1's enforceable rule names
+  `infrastructure` and nothing else, and its own tree places `schemas` under `entrypoints/api/`,
+  which 2.3 made Pydantic classes — a driving adapter carrying its own transport library is the
+  established shape, and `pika` here is the worker's case of it.
+  *Rejected:* **a consuming adapter in `infrastructure/broker/`** — it drags 8.1's acknowledgement
+  policy across the seam, and that policy reads business outcomes, not a library. **Wrapping the
+  call in `main.py`** — real logic hidden in wiring.
+
+  *Left open deliberately:* every log line's shape here, truncation included, is **8.7**. The
+  connection loop around the callback is **8.8**.
+  *Source:* R10, DoD. *Constrained by:* 3.1, 7.3, 7.4, 7.7, 8.1, 8.2, 8.3, 8.5.
+  *Realised in:* U6 — the wrapper is part of 7.3's module and lands with the pair it joins, which
+  is where its neighbour `deserialize` also waits for U8's consumer. U8 realises everything else
+  in this record.
+
 - **8.5 Consumer concurrency.** `[decided]`
   *Decision:* **one worker replica in compose, prefetch 1.** This is a deployment choice, not
   a correctness mechanism — correctness comes from 8.9. The README states that scaling to N
@@ -2722,6 +2789,135 @@ and Part 4 of `03-roadmap.md`).
   and `GET /orders/{id}` returns the driver. The log line exists for the human reading
   `docker compose up`, which is a real job — just not an assertion's job.
   *Source:* R8. *Answers:* Q7. *Constrains:* 8.7.
+
+- **8.7 Logging format and levels.** `[decided]`
+  *Decision:* **`key=value` on one line, through the standard library, correlated by `order_id`.**
+  It governs both services, not only the worker: 10.4 gives them one `PIZZA_LOG_LEVEL`, and a
+  format defined per service is a format that will differ.
+
+  *Configuration.* One function, `configure_logging(level: str) -> None` in `pizza/log.py`,
+  called by both `main.py` files. The record line is
+  `%(asctime)s %(levelname)-8s %(name)s %(message)s`, and the message is `event=<name>` followed
+  by fields. The default stream stands — Docker captures both, so there is nothing to choose.
+
+  *Every line the system emits, with its level:*
+
+  | Line | Level | Fixed by |
+  |---|---|---|
+  | `event=worker_ready` | `INFO` | 8.8 |
+  | `event=dispatch_notification order_id driver_id driver_name at` | `INFO` | 8.6 |
+  | `event=no_driver_available order_id attempt` | `WARNING` | 8.2's cycle |
+  | `event=dispatch_failed order_id` | `ERROR` | 8.3 |
+  | `event=poison_message body` | `ERROR` | 8.4 |
+  | `event=order_not_found order_id` | `ERROR` | 8.4 |
+  | `event=dispatch_error order_id`, with the traceback | `ERROR` | 8.4 |
+  | `event=broker_unreachable` · `event=broker_connection_lost` | `ERROR` | 8.8 |
+
+  `WARNING` rather than `INFO` for the no-driver rejection, because those are the lines a reviewer
+  is meant to watch: 1.2's steps 7 and 8 are 64 seconds of that cycle, and they should not read as
+  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output,
+  and no per-library level is curated, since a filtered module list is configuration with no
+  reader.
+  *`at=` is not a duplicate of `asctime`:* it is when the assignment happened, taken from the
+  `Clock` and written to the database, against when the line was emitted.
+
+  *Why `key=value` and not JSON per line.* The only consumer is a person reading
+  `docker compose up`; there is no aggregator in Compose to parse for. JSON would roughly double
+  the width of every line and make it harder to scan by eye, in exchange for a capability nothing
+  uses. 8.6 also already fixed the shape of one line, and 2.6 declined `structlog` on the ground
+  that the standard library covers it.
+
+  *Correlation is `order_id`, and no trace identifier is generated.* The order id is already the
+  same value in the API request, the outbox row, the message and every worker line, and it is what
+  a person actually searches for — "what happened to this order". A trace id generated at the edge
+  would correlate one request rather than one order's life, and carrying it to the worker means
+  reopening 7.2, which is decided and carries identifiers only.
+
+  *The truncation 8.4 deferred: **200 bytes, logged as `repr`**.* The number is derived rather than
+  picked — 7.2's payload is three identifiers and a timestamp, about 150 characters serialized, so
+  200 shows a whole well-formed message and the head of anything larger. `repr` rather than a
+  decode, because malformed UTF-8 is one of the causes of that line, and decoding would fail on
+  exactly the input it was written for.
+
+  *Roadmap consequence, recorded rather than assumed:* U7 builds `pizza/log.py` because it is the
+  first entrypoint, so `8.7` joins U7's *Decided by* cell in Part 4.
+  *Source:* R8, R9, DoD. *Constrained by:* 2.6, 7.2, 8.4, 8.6, 8.8, 10.4.
+  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines).
+
+- **8.8 Startup and shutdown behaviour.** `[decided]`
+  *Decision:* **the worker retries nothing itself.** It exits on a broker it cannot reach or has
+  lost, and the restart policy brings it back; `SIGTERM` stops it after the message in hand.
+
+  *The database needs nothing here, and the absence is the decision rather than an omission.*
+  Three items already cover its three cases: 4.6 starts the worker only after the one-shot schema
+  service exits zero, so it never meets an unready database; 8.4 puts a database that falls over
+  mid-message into its third class, where the message circles until it returns; and 2.5's
+  `pool_pre_ping` replaces a connection that went stale. A fourth mechanism here would be the
+  only one of the four nobody needed.
+
+  *The broker: no loop of ours.* A `BlockingConnection` that cannot be opened, and a connection
+  lost inside `start_consuming()`, both log one `ERROR` and exit non-zero. The retry is Docker's
+  restart policy and its own exponential backoff.
+  *Why exiting costs nothing:* the worker holds no state. Everything durable is in PostgreSQL and
+  the broker, and a message in flight was unacknowledged, so 7.4's redelivery applies exactly as
+  it does to any other connection loss. A restarted process resumes by taking the next message,
+  which is all the old one was doing.
+  *Rejected:* **an unbounded in-process reconnect loop at a fixed cadence** — it pays for a delay
+  constant nothing derives, for a bounded-or-not decision that only exists once the loop does, and
+  for a `while True` around the whole subscription; and it leaves the service reporting `running`
+  while it cannot work, where a restarting container shows its count in `docker compose ps`.
+  **A bounded loop then exit** — the same costs, plus an N, to reach the behaviour the restart
+  policy already gives.
+
+  *This narrows 7.7, and does not do so quietly.* Its *"every connection, first or subsequent,
+  declares the topology before subscribing"* stays true of the publisher and empties on the
+  consumer side, where every connection is now a first connection. The asymmetry is earned rather
+  than arbitrary: the publisher reconnects in process because it is inside an HTTP request and
+  cannot exit, and the worker is under no such constraint. 7.7 already records one asymmetry
+  between the two, over heartbeats.
+
+  *Shutdown.* `entrypoints/worker/main.py` registers a `SIGTERM` handler — the composition root,
+  because a signal is a property of the process and not of the consumer or the broker adapter:
+
+  ```python
+  connection.add_callback_threadsafe(channel.stop_consuming)
+  ```
+
+  The handler **requests** rather than acts, which is what produces the wanted order without
+  logic of ours: a signal arriving mid-message enqueues the request, the transaction finishes,
+  the ack goes out, and `pika` runs the request when the callback returns. `start_consuming()`
+  then returns for the first time in the process's life, the connection closes, and the process
+  exits **`0`** — the value that separates "leave me" from "restart me".
+  *Why `add_callback_threadsafe` and not `stop_consuming()` directly:* Python runs a signal
+  handler wherever the process happens to be, including inside `pika`, and re-entering the library
+  there breaks non-deterministically. This call only enqueues and wakes the loop, which then runs
+  it at a point it chose.
+  *`SIGTERM` only.* Every stop path in the deployed environment sends it — `down`, `stop`,
+  `restart`, and `Ctrl+C` on a foreground `up`. `SIGKILL` admits no handler in any language, and
+  there redelivery is the whole answer. `SIGINT` reaches only a direct host run, which is not how
+  this system is run; adding it is one line.
+  *Stated so U8 does not improvise:* when the connection is already closed — the broker died and
+  the process is on its way out — the handler does nothing.
+  *Rejected:* **no handler at all.** Correctness does not require one: 8.1 acks after the commit,
+  5.5 is idempotent, and 7.4 redelivers, so a killed worker loses nothing. It is declined because
+  the item asks how the worker shuts down without losing an in-flight message, and answering at
+  the process level rather than delegating to redelivery costs six lines.
+
+  *One `INFO` line once `basic_consume` has succeeded*, so `docker compose up` shows the worker
+  reaching readiness. Its shape and level are 8.7's, with every other line in the worker.
+
+  *Handed on, so that neither side decides the other's half by implication:*
+
+  | To | What | Kind |
+  |---|---|---|
+  | 11.11 | The worker's resilience **is** the restart policy — it must restart the worker on a non-zero exit. Nothing in the code retries | **requirement** |
+  | 11.9 | The image's `CMD` must be **exec form**. Under shell form `sh` receives the `SIGTERM` and does not forward it, so the handler above never runs and the failure is silent | **requirement** |
+  | 11.2 | The worker needs no `depends_on` on the broker for correctness. Without one it will exit and restart a handful of times on each `up` while RabbitMQ boots — legibility, and 11.2's to weigh | note |
+  | 11.2 | The worker offers **no healthcheck** and no endpoint to probe; it speaks no HTTP, and 6.6's probe is the API's. A worker healthcheck would need a mechanism invented for it | note |
+  | 11.2 / 11.11 | `stop_grace_period` is Compose's. 8.8 fixes only that the worker stops after the message in hand, which takes milliseconds | note |
+
+  *Source:* R14, R10. *Constrained by:* 4.6, 5.5, 7.4, 7.7, 8.1, 8.4, 8.5.
+  *Narrows:* 7.7. *Constrains:* 11.2, 11.9, 11.11. *Realised in:* U8.
 
 - **8.9 Concurrency-safe driver claiming.** `[decided]`
   *Decision:* the claim uses **`SELECT … FOR UPDATE SKIP LOCKED LIMIT 1`** over available
@@ -3608,6 +3804,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A25** † | The local credentials are non-secret committed defaults for a disposable environment; a real deployment supplies its own | 10.5 |
 | **A26** | Every configuration value comes from the environment, and `docker-compose.yml` is the only place a default is written | 10.1, 10.2 |
 | **A27** | `POST /orders` and `PATCH /orders/{id}/status` return the full order representation; the brief specifies no response body for either | 6.1 |
+| **A28** | A dispatch message that cannot be decoded is dropped; the order stays `PENDING` and the log is the only record | 8.4 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".
 It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the structure is now
