@@ -24,14 +24,14 @@ status markers, precisely so that this table cannot be contradicted.
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
-| 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
+| 8 — Worker | 8.1–8.6, 8.9 | 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **87** | **23** |
+| **Total** | **88** | **22** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2668,6 +2668,73 @@ and Part 4 of `03-roadmap.md`).
   is not one.
   *Source:* R9, R17. *Answers:* Q6. *Defines:* F7. *Completed by:* 7.4.
 
+- **8.4 Poison message handling.** `[decided]`
+  *Decision:* **three classes of failure, two dispositions, and one decoding seam.**
+
+  | Class | Disposition |
+  |---|---|
+  | The bytes do not decode — `SerializationError` (7.3), malformed UTF-8 included | log at `ERROR` with the body, **`ack`**, drop |
+  | `OrderNotFound` — a well-formed event naming an order that is not in the database | log at `ERROR`, **`ack`**, drop |
+  | Any other exception | log at `ERROR` with the traceback, **`reject(requeue=false)`** into 8.2's cycle, **unbounded** |
+
+  *Why the first two drop — nearer to forced than chosen.* Neither is repairable by time, and
+  neither leaves anything to record: the `order_id` of an undecodable message is inside the bytes
+  that did not decode, and an order that is not there has no row to mark, so 8.3's `FAILED` is
+  unavailable and the log line is the whole record. `OrderNotFound` is a broken invariant rather
+  than a race — 7.5 writes the outbox row in the order's own transaction and publishes after the
+  commit.
+  *Rejected:* **a parking queue** — 8.3 declined one for the exhaustion path as invisible and
+  irrecoverable without FW5; here it is worse, since a parked message we cannot name an order for
+  has no reader at all.
+  *Accepted cost, recorded as A28:* the order stays `PENDING` with no `FAILED` marker. Bounded
+  rather than removed by two facts: R5 publishes twice per order, and the only producer is our own
+  `serialize`, so this class means a bug of ours or a hand-injected message.
+
+  *Why the third retries, and unbounded.* Its two populations — a transient infrastructure fault
+  and a bug of ours — are both repaired by something a person does, after which the message passes
+  and is acked. The cycle is self-healing and loud: one `ERROR` per TTL until somebody acts. The
+  exhaustion path is not a special case: with the database down, 8.3's `give_up()` raises into
+  this class and the message keeps circling until the database returns.
+  *Rejected:* **`ack` and drop** — a one-second database blip costs an order silently and
+  permanently, which is the failure 7.4 called *categorically worse*; this record does not reverse
+  that ranking one item later. **A bounded reject, dropping after N** — nothing derives N, and a
+  fault outlasting N × TTL still loses orders while consuming the ones behind them.
+  *Accepted cost:* every `reject` increments the same `x-death` entry 7.4 made the retry budget,
+  so a spell of exceptions shortens 10.4's 64-second demo floor. A second counter needs a header
+  of ours and a republish, both already rejected by 8.2 and 7.4.
+
+  *Can a poison message block the queue — the question the item was opened on.* **No.** 8.5 holds
+  one unacknowledged message at a time, and all three paths terminate inside the callback in an
+  `ack` or a `reject`.
+
+  *The seam, which 7.3 and 7.7 both left here.* 3.1 forbids `entrypoints/worker/consumer.py` to
+  import `infrastructure/`, so it can name neither `deserialize` nor `SerializationError`. One
+  function joins 7.3's pair in its module:
+
+  ```python
+  # infrastructure/broker/serialization.py
+  def deserialize_or_none(raw: bytes) -> OrderReadyEvent | None:   # None on SerializationError
+  ```
+
+  `entrypoints/worker/main.py` injects it as a `Callable[[bytes], OrderReadyEvent | None]`; the
+  consumer holds the `pika` callback, logs the poison line from the body it already has, and acks.
+  The `except` names one declared type and converts it to a value the signature forces every caller
+  to handle, so a bug of ours passes through it into the third class rather than being swallowed.
+  *What the consumer may import, since the arrangement rests on it:* 3.1's enforceable rule names
+  `infrastructure` and nothing else, and its own tree places `schemas` under `entrypoints/api/`,
+  which 2.3 made Pydantic classes — a driving adapter carrying its own transport library is the
+  established shape, and `pika` here is the worker's case of it.
+  *Rejected:* **a consuming adapter in `infrastructure/broker/`** — it drags 8.1's acknowledgement
+  policy across the seam, and that policy reads business outcomes, not a library. **Wrapping the
+  call in `main.py`** — real logic hidden in wiring.
+
+  *Left open deliberately:* every log line's shape here, truncation included, is **8.7**. The
+  connection loop around the callback is **8.8**.
+  *Source:* R10, DoD. *Constrained by:* 3.1, 7.3, 7.4, 7.7, 8.1, 8.2, 8.3, 8.5.
+  *Realised in:* U6 — the wrapper is part of 7.3's module and lands with the pair it joins, which
+  is where its neighbour `deserialize` also waits for U8's consumer. U8 realises everything else
+  in this record.
+
 - **8.5 Consumer concurrency.** `[decided]`
   *Decision:* **one worker replica in compose, prefetch 1.** This is a deployment choice, not
   a correctness mechanism — correctness comes from 8.9. The README states that scaling to N
@@ -3608,6 +3675,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A25** † | The local credentials are non-secret committed defaults for a disposable environment; a real deployment supplies its own | 10.5 |
 | **A26** | Every configuration value comes from the environment, and `docker-compose.yml` is the only place a default is written | 10.1, 10.2 |
 | **A27** | `POST /orders` and `PATCH /orders/{id}/status` return the full order representation; the brief specifies no response body for either | 6.1 |
+| **A28** | A dispatch message that cannot be decoded is dropped; the order stays `PENDING` and the log is the only record | 8.4 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".
 It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the structure is now
