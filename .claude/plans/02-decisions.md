@@ -24,14 +24,14 @@ status markers, precisely so that this table cannot be contradicted.
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
-| 8 — Worker | 8.1–8.6, 8.8, 8.9 | 8.7 |
+| 8 — Worker | 8.1–8.9 | — |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **89** | **21** |
+| **Total** | **90** | **20** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2789,6 +2789,60 @@ and Part 4 of `03-roadmap.md`).
   and `GET /orders/{id}` returns the driver. The log line exists for the human reading
   `docker compose up`, which is a real job — just not an assertion's job.
   *Source:* R8. *Answers:* Q7. *Constrains:* 8.7.
+
+- **8.7 Logging format and levels.** `[decided]`
+  *Decision:* **`key=value` on one line, through the standard library, correlated by `order_id`.**
+  It governs both services, not only the worker: 10.4 gives them one `PIZZA_LOG_LEVEL`, and a
+  format defined per service is a format that will differ.
+
+  *Configuration.* One function, `configure_logging(level: str) -> None` in `pizza/log.py`,
+  called by both `main.py` files. The record line is
+  `%(asctime)s %(levelname)-8s %(name)s %(message)s`, and the message is `event=<name>` followed
+  by fields. The default stream stands — Docker captures both, so there is nothing to choose.
+
+  *Every line the system emits, with its level:*
+
+  | Line | Level | Fixed by |
+  |---|---|---|
+  | `event=worker_ready` | `INFO` | 8.8 |
+  | `event=dispatch_notification order_id driver_id driver_name at` | `INFO` | 8.6 |
+  | `event=no_driver_available order_id attempt` | `WARNING` | 8.2's cycle |
+  | `event=dispatch_failed order_id` | `ERROR` | 8.3 |
+  | `event=poison_message body` | `ERROR` | 8.4 |
+  | `event=order_not_found order_id` | `ERROR` | 8.4 |
+  | `event=dispatch_error order_id`, with the traceback | `ERROR` | 8.4 |
+  | `event=broker_unreachable` · `event=broker_connection_lost` | `ERROR` | 8.8 |
+
+  `WARNING` rather than `INFO` for the no-driver rejection, because those are the lines a reviewer
+  is meant to watch: 1.2's steps 7 and 8 are 64 seconds of that cycle, and they should not read as
+  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output,
+  and no per-library level is curated, since a filtered module list is configuration with no
+  reader.
+  *`at=` is not a duplicate of `asctime`:* it is when the assignment happened, taken from the
+  `Clock` and written to the database, against when the line was emitted.
+
+  *Why `key=value` and not JSON per line.* The only consumer is a person reading
+  `docker compose up`; there is no aggregator in Compose to parse for. JSON would roughly double
+  the width of every line and make it harder to scan by eye, in exchange for a capability nothing
+  uses. 8.6 also already fixed the shape of one line, and 2.6 declined `structlog` on the ground
+  that the standard library covers it.
+
+  *Correlation is `order_id`, and no trace identifier is generated.* The order id is already the
+  same value in the API request, the outbox row, the message and every worker line, and it is what
+  a person actually searches for — "what happened to this order". A trace id generated at the edge
+  would correlate one request rather than one order's life, and carrying it to the worker means
+  reopening 7.2, which is decided and carries identifiers only.
+
+  *The truncation 8.4 deferred: **200 bytes, logged as `repr`**.* The number is derived rather than
+  picked — 7.2's payload is three identifiers and a timestamp, about 150 characters serialized, so
+  200 shows a whole well-formed message and the head of anything larger. `repr` rather than a
+  decode, because malformed UTF-8 is one of the causes of that line, and decoding would fail on
+  exactly the input it was written for.
+
+  *Roadmap consequence, recorded rather than assumed:* U7 builds `pizza/log.py` because it is the
+  first entrypoint, so `8.7` joins U7's *Decided by* cell in Part 4.
+  *Source:* R8, R9, DoD. *Constrained by:* 2.6, 7.2, 8.4, 8.6, 8.8, 10.4.
+  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines).
 
 - **8.8 Startup and shutdown behaviour.** `[decided]`
   *Decision:* **the worker retries nothing itself.** It exits on a broker it cannot reach or has
