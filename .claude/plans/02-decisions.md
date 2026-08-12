@@ -2285,6 +2285,31 @@ and Part 4 of `03-roadmap.md`).
   ceremony: it is idempotent and cheap, and it is the only path by which a broker that came up on
   an empty volume gets its topology back without restarting a service.
 
+  *Which failures it answers: **every** AMQP fault, not a classified subset.* Raised as a review
+  question on 2026-08-12 — most `pika` exceptions do not mean the connection died, so should the
+  retry be narrowed to the ones that do? The four that reach a publish in confirm mode, read from
+  pika 1.4.4:
+
+  | Raised | The connection | What the blanket reconnect produces |
+  |---|---|---|
+  | `UnroutableError` | alive | re-declares the topology, publishes, **succeeds** |
+  | `ChannelClosedByBroker` (406) | alive, channel dead | re-declares, fails identically, `PublishFailed` |
+  | `NackError` | alive | one more attempt, then `PublishFailed` |
+  | `StreamLostError`, `ConnectionClosed`, `AMQPHeartbeatTimeout` | dead | the stale-connection case above — the reason the retry exists |
+
+  **The first row decides it.** `UnroutableError` is the one that most looks like a fault no
+  reconnect can help, and it is the one where reconnecting is the entire repair — it is how the
+  paragraph above returns a topology to a broker that lost it. A classification excluding
+  "not a disconnect" would exclude exactly that, while reading as the more precise rule.
+  *The outcome is already correct in all four rows*, so what the blanket policy costs is one
+  wasted connection attempt on rows 2 and 3 — bounded by the timeouts above, and inside the two
+  attempts 7.5 promises. What the alternative costs is a table of exception types maintained by
+  hand against a library that ships no type information, so that a `pika` upgrade can silently
+  reclassify a failure.
+  *Recorded rather than left implicit because the question is a good one and will be asked again.*
+  7.5 fixed that a failure on an established connection is retried once; it did not say **which**
+  failures, and this is that sentence.
+
   *The consumer.* One connection, one channel, `basic_qos(prefetch_count=1)` per 8.5,
   `basic_consume` then `start_consuming()` on the main thread; the order read, the claim and the
   ack all happen inside the callback on that same thread. **There is no thread-safety problem on
