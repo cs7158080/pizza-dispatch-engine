@@ -49,8 +49,9 @@ Each line names the item that owns it, so nothing here is silence.
 ## 3. Branch, commits, and the merge
 
 - **Branch:** `feat/u5-persistence`, cut from `main` at `570a802` (14.2).
-- **Commits:** one amendment commit, one planning commit, then one commit per step (14.3, 14.4).
-  Ten in total.
+- **Commits:** one amendment commit, one planning commit, then one commit per step (14.3, 14.4),
+  and one further amendment where step 4 found a decided expression that the chosen stack does not
+  support. Eleven in total.
 - **Merge:** one pull request, squash-merged, its title ending in `(#10)` (14.2, 14.3). The branch
   is not deleted (14.2).
 
@@ -58,6 +59,7 @@ Each line names the item that owns it, so nothing here is silence.
 |---|---|---|
 | A | amendment | `docs: file 7.3's module under the unit that writes it` |
 | B | planning | `docs: plan the persistence layer` |
+| C | amendment | `docs: write the outbox payload as the structure the column stores` |
 | 1 | step | `chore: let the linter hold the dependency rule` |
 | 2 | step | `feat: turn the event into bytes, and back` |
 | 3 | step | `feat: give the core a clock it can read` |
@@ -77,6 +79,13 @@ cannot cite a record the history does not yet contain.
 others had U5 calling it, and U5 depends on U2 and U3 alone. The module is now U5's, `broker/` is
 still where it lives, and the `db/ → broker/` edge that follows is stated in 7.3 rather than left
 to be discovered.
+
+**C is not a plan step either, and it came from inside step 4.** 7.3 had the adapter write
+`serialize(event).decode("utf-8")` into a `jsonb` column, and SQLAlchemy's `JSONB` runs
+`json.dumps` over what it is handed — so an already-serialized string is encoded twice and the row
+keeps a JSON string instead of an object, silently. That is a decided record contradicted by the
+library 2.5 chose, not a silence this plan may fill, so implementation stopped and the record was
+corrected first. Step 7 below is written against the corrected expression.
 
 ## 4. The Definition of Done that applies to every step
 
@@ -359,8 +368,9 @@ mean anything.
 
 `SqlAlchemyOutboxStore`, naming `OutboxStore` as its base (R-b) and taking a `Session`. `add(event)`
 writes one row: `event_id`, `event_type` from the class constant `OrderReadyEvent.EVENT_TYPE` (7.2),
-`payload` as `serialize(event).decode("utf-8")` (7.3 — a decode that cannot fail on bytes we
-produced), `created_at` per R-e, `published_at` null. It does not commit; 7.5 requires the row and
+`payload` as `json.loads(serialize(event).decode("utf-8"))` (7.3, as commit C corrected it — the
+column stores the structure, and the bytes it is parsed from come from the one producer),
+`created_at` per R-e, `published_at` null. It does not commit; 7.5 requires the row and
 the status change to be one transaction, and the commit is the use case's.
 
 `mark_published(event_id, now)` issues the `UPDATE`, translates `SQLAlchemyError` to

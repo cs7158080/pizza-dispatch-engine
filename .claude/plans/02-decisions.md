@@ -2001,7 +2001,14 @@ and Part 4 of `03-roadmap.md`).
   *The same function produces both copies*, the wire message and the stored `payload`. That is the
   whole point of the outbox row: it is evidence of what was meant to go out, and two functions
   producing approximately the same thing would make it a guess. The database adapter writes
-  `serialize(event).decode("utf-8")` — a decode that cannot fail on bytes we produced.
+  `json.loads(serialize(event).decode("utf-8"))` — the bytes come from the one producer, the decode
+  cannot fail on bytes we produced, and the parse hands the `jsonb` column the structure it stores.
+  *The expression this record first carried, the decode alone, does not survive the stack 2.5
+  chose.* SQLAlchemy's `JSONB` runs `json.dumps` over whatever it is given, so a string that already
+  holds JSON is encoded a second time and the row keeps a JSON **string** rather than an object.
+  `payload ->> 'order_id'` — the one query 4.5 keeps the column for — then returns null, and the
+  insert succeeds either way, so the fault would surface only when someone came to read the
+  evidence. Found in U5's step 4, against the dialect rather than from memory.
   *Both signatures take and return `bytes`, deliberately.* UTF-8 decoding belongs inside the
   boundary: with a `str` parameter, malformed bytes raise `UnicodeDecodeError` before
   `deserialize` is entered, and 8.4's poison-message path would have to catch two families of
