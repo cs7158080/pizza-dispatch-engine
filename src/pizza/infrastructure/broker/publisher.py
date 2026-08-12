@@ -57,13 +57,15 @@ class PikaEventPublisher(EventPublisher):
         with self._lock:
             channel = self._channel
             if channel is None:
-                self._send_or_fail(self._open_or_fail(), body)
+                channel = self._open_or_fail()
+                self._send_or_fail(channel, body)
                 return
 
             try:
                 self._send(channel, body)
             except _BROKER_FAULTS:
-                self._send_or_fail(self._reconnect_or_fail(), body)
+                channel = self._reconnect_or_fail()
+                self._send_or_fail(channel, body)
 
     def close(self) -> None:
         """Close the connection if one was ever opened. Safe to call at any time."""
