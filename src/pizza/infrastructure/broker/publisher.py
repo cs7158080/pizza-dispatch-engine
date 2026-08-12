@@ -1,18 +1,15 @@
-"""Putting an event on the wire, and the connection it travels over.
+"""Putting an event on the wire, over one connection opened at the first publish.
 
-The connection is opened on the first publish and kept afterwards. It is guarded by a
-lock because the API serves requests from a thread pool and this client is not
-thread-safe: the lock covers the send, the wait for the broker's confirmation, and the
-reconnection, so publishes serialise.
+A lock covers the send, the confirmation and the reconnection: requests arrive on a
+thread pool and this client is not thread-safe.
 
-An idle connection is expected to be closed by the broker, since heartbeats are only
-serviced while a call into the client is in progress. That is what the single retry is
-for — a publish that fails on a connection we already held is tried once more on a fresh
-one, and the caller sees nothing. A connection that cannot be opened at all is a
-different failure, and it is reported rather than retried.
+The retry is asymmetric. The broker closes an idle connection, since heartbeats go
+unserviced between publishes — so a failure on a connection we already held is repaired
+by one fresh one, while a connection that cannot be opened at all has nothing to
+reconnect from and is reported instead.
 
-Every failure leaves as `PublishFailed`. The caller decides what that means; here it
-only has to be one kind of error.
+Every failure leaves as `PublishFailed`: the use case that catches it may not import a
+pika exception, so reducing them all to one named type is this module's duty here.
 """
 
 import threading
@@ -101,12 +98,9 @@ class PikaEventPublisher(EventPublisher):
         return channel
 
     def _parameters(self) -> pika.URLParameters:
-        """Build the connection parameters, bounded by the configured timeout.
-
-        Three separate timeouts are needed to bound one attempt: the socket connect, the
-        full protocol bring-up on top of it, and the broker announcing that it is
-        stalled. Leaving any of them at its default leaves the attempt longer than the
-        caller was promised.
+        """Bound one attempt: the socket connect, the bring-up on top of it, and the
+        broker announcing that it is stalled. A default left in place outlasts the
+        timeout the caller was promised.
         """
         parameters = pika.URLParameters(self._broker_url)
         parameters.socket_timeout = self._publish_timeout_seconds

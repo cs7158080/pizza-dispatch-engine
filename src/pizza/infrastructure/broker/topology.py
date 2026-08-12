@@ -1,16 +1,9 @@
-"""The exchanges, queues and bindings the system publishes and consumes through.
+"""The exchanges, queues and bindings, declared by both services from one function.
 
-Both services declare all of it, from this one function. Declaring is idempotent, so
-whichever starts first creates the topology and the other finds it already there;
-neither depends on the order.
-
-The two exchanges form a cycle that supplies the delay between dispatch attempts. A
-message the worker rejects leaves the dispatch queue for the retry exchange, waits in a
-queue that has no consumer until its time to live expires, and returns to the main
-exchange. Nothing in this system runs a timer for it.
-
-Changing an argument of a queue that already exists is refused by the broker and closes
-the channel. Recreating the broker is the repair.
+Declaring is idempotent, so neither depends on which started first. The two exchanges
+form the retry cycle: a rejected message waits in a queue that has no consumer until its
+time to live expires, then returns to the main exchange — the delay between dispatch
+attempts, with no timer of ours in it.
 """
 
 from pika.adapters.blocking_connection import BlockingChannel
@@ -25,11 +18,7 @@ ORDER_READY_WAIT_KEY = "order.ready.wait"
 
 
 def wait_queue_arguments(retry_delay_seconds: int) -> dict[str, object]:
-    """Build the wait queue's arguments from the configured retry delay.
-
-    The delay is configured in seconds and AMQP expresses a queue's time to live in
-    milliseconds, so the conversion happens here and nowhere else.
-    """
+    """The delay is configured in seconds and AMQP declares it in milliseconds."""
     return {
         "x-message-ttl": retry_delay_seconds * 1000,
         "x-dead-letter-exchange": ORDERS_EXCHANGE,
@@ -38,11 +27,10 @@ def wait_queue_arguments(retry_delay_seconds: int) -> dict[str, object]:
 
 
 def declare(channel: BlockingChannel, retry_delay_seconds: int) -> None:
-    """Declare every object above on the given channel.
+    """Declare everything above, on every connection either service opens.
 
-    Called by both services on every connection they open, including the first.
     Publishing to an exchange that does not exist closes the channel, so this runs
-    before the first publish rather than only after a reconnection.
+    before the first publish and not only after a reconnection.
     """
     channel.exchange_declare(ORDERS_EXCHANGE, exchange_type="direct", durable=True)
     channel.exchange_declare(RETRY_EXCHANGE, exchange_type="direct", durable=True)
