@@ -24,14 +24,14 @@ status markers, precisely so that this table cannot be contradicted.
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
-| 8 — Worker | 8.1–8.6, 8.9 | 8.7, 8.8 |
+| 8 — Worker | 8.1–8.6, 8.8, 8.9 | 8.7 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **88** | **22** |
+| **Total** | **89** | **21** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2789,6 +2789,81 @@ and Part 4 of `03-roadmap.md`).
   and `GET /orders/{id}` returns the driver. The log line exists for the human reading
   `docker compose up`, which is a real job — just not an assertion's job.
   *Source:* R8. *Answers:* Q7. *Constrains:* 8.7.
+
+- **8.8 Startup and shutdown behaviour.** `[decided]`
+  *Decision:* **the worker retries nothing itself.** It exits on a broker it cannot reach or has
+  lost, and the restart policy brings it back; `SIGTERM` stops it after the message in hand.
+
+  *The database needs nothing here, and the absence is the decision rather than an omission.*
+  Three items already cover its three cases: 4.6 starts the worker only after the one-shot schema
+  service exits zero, so it never meets an unready database; 8.4 puts a database that falls over
+  mid-message into its third class, where the message circles until it returns; and 2.5's
+  `pool_pre_ping` replaces a connection that went stale. A fourth mechanism here would be the
+  only one of the four nobody needed.
+
+  *The broker: no loop of ours.* A `BlockingConnection` that cannot be opened, and a connection
+  lost inside `start_consuming()`, both log one `ERROR` and exit non-zero. The retry is Docker's
+  restart policy and its own exponential backoff.
+  *Why exiting costs nothing:* the worker holds no state. Everything durable is in PostgreSQL and
+  the broker, and a message in flight was unacknowledged, so 7.4's redelivery applies exactly as
+  it does to any other connection loss. A restarted process resumes by taking the next message,
+  which is all the old one was doing.
+  *Rejected:* **an unbounded in-process reconnect loop at a fixed cadence** — it pays for a delay
+  constant nothing derives, for a bounded-or-not decision that only exists once the loop does, and
+  for a `while True` around the whole subscription; and it leaves the service reporting `running`
+  while it cannot work, where a restarting container shows its count in `docker compose ps`.
+  **A bounded loop then exit** — the same costs, plus an N, to reach the behaviour the restart
+  policy already gives.
+
+  *This narrows 7.7, and does not do so quietly.* Its *"every connection, first or subsequent,
+  declares the topology before subscribing"* stays true of the publisher and empties on the
+  consumer side, where every connection is now a first connection. The asymmetry is earned rather
+  than arbitrary: the publisher reconnects in process because it is inside an HTTP request and
+  cannot exit, and the worker is under no such constraint. 7.7 already records one asymmetry
+  between the two, over heartbeats.
+
+  *Shutdown.* `entrypoints/worker/main.py` registers a `SIGTERM` handler — the composition root,
+  because a signal is a property of the process and not of the consumer or the broker adapter:
+
+  ```python
+  connection.add_callback_threadsafe(channel.stop_consuming)
+  ```
+
+  The handler **requests** rather than acts, which is what produces the wanted order without
+  logic of ours: a signal arriving mid-message enqueues the request, the transaction finishes,
+  the ack goes out, and `pika` runs the request when the callback returns. `start_consuming()`
+  then returns for the first time in the process's life, the connection closes, and the process
+  exits **`0`** — the value that separates "leave me" from "restart me".
+  *Why `add_callback_threadsafe` and not `stop_consuming()` directly:* Python runs a signal
+  handler wherever the process happens to be, including inside `pika`, and re-entering the library
+  there breaks non-deterministically. This call only enqueues and wakes the loop, which then runs
+  it at a point it chose.
+  *`SIGTERM` only.* Every stop path in the deployed environment sends it — `down`, `stop`,
+  `restart`, and `Ctrl+C` on a foreground `up`. `SIGKILL` admits no handler in any language, and
+  there redelivery is the whole answer. `SIGINT` reaches only a direct host run, which is not how
+  this system is run; adding it is one line.
+  *Stated so U8 does not improvise:* when the connection is already closed — the broker died and
+  the process is on its way out — the handler does nothing.
+  *Rejected:* **no handler at all.** Correctness does not require one: 8.1 acks after the commit,
+  5.5 is idempotent, and 7.4 redelivers, so a killed worker loses nothing. It is declined because
+  the item asks how the worker shuts down without losing an in-flight message, and answering at
+  the process level rather than delegating to redelivery costs six lines.
+
+  *One `INFO` line once `basic_consume` has succeeded*, so `docker compose up` shows the worker
+  reaching readiness. Its shape and level are 8.7's, with every other line in the worker.
+
+  *Handed on, so that neither side decides the other's half by implication:*
+
+  | To | What | Kind |
+  |---|---|---|
+  | 11.11 | The worker's resilience **is** the restart policy — it must restart the worker on a non-zero exit. Nothing in the code retries | **requirement** |
+  | 11.9 | The image's `CMD` must be **exec form**. Under shell form `sh` receives the `SIGTERM` and does not forward it, so the handler above never runs and the failure is silent | **requirement** |
+  | 11.2 | The worker needs no `depends_on` on the broker for correctness. Without one it will exit and restart a handful of times on each `up` while RabbitMQ boots — legibility, and 11.2's to weigh | note |
+  | 11.2 | The worker offers **no healthcheck** and no endpoint to probe; it speaks no HTTP, and 6.6's probe is the API's. A worker healthcheck would need a mechanism invented for it | note |
+  | 11.2 / 11.11 | `stop_grace_period` is Compose's. 8.8 fixes only that the worker stops after the message in hand, which takes milliseconds | note |
+
+  *Source:* R14, R10. *Constrained by:* 4.6, 5.5, 7.4, 7.7, 8.1, 8.4, 8.5.
+  *Narrows:* 7.7. *Constrains:* 11.2, 11.9, 11.11. *Realised in:* U8.
 
 - **8.9 Concurrency-safe driver claiming.** `[decided]`
   *Decision:* the claim uses **`SELECT … FOR UPDATE SKIP LOCKED LIMIT 1`** over available
