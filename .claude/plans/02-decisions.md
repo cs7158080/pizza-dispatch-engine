@@ -27,11 +27,11 @@ status markers, precisely so that this table cannot be contradicted.
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
-| 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
+| 11 — Docker Compose | 11.1, 11.3–11.7 | 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **82** | **28** |
+| **Total** | **83** | **27** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2738,6 +2738,67 @@ and Part 4 of `03-roadmap.md`).
 
 
 ## Topic 11 — Docker Compose
+
+- **11.1 Service inventory.** `[decided]`
+  *Decision:* **seven services, and not one of their names is chosen here.**
+
+  | Service | Image | Named by |
+  |---|---|---|
+  | `postgres` | vendor | 2.2; the name by 10.1's `@postgres:5432` |
+  | `rabbitmq` | vendor | 2.1; the name by 10.1's `@rabbitmq:5672` |
+  | `schema` | `pizza-runtime`, one-shot | 4.6, which writes both the service and its name |
+  | `api` | `pizza-runtime` | 3.7; the name by 10.1's `http://api:8000` |
+  | `worker` | `pizza-runtime` | 3.7; the name by 4.6's diagram |
+  | `tests` | `pizza-test` (`target: test`) | 3.7, 11.3; the name by 11.4's `--exit-code-from tests` |
+  | `cli` | `pizza-runtime`, `profiles: ["cli"]` | 9.3, which writes `docker compose run --rm cli` |
+
+  *Every name in the third column is already load-bearing somewhere else* — inside a URL our code
+  parses, or inside a command the README hands a reviewer. This item transcribes them; renaming
+  one is a change to the record that fixed it, not to this one.
+  *The list is closed at seven.* The inventory's "any init/migration service" is one slot and 4.6
+  filled it. FW2's relay would be the eighth and is not built.
+
+  **The build arrangement, which 3.7 handed here in one sentence** — *"where the image is tagged so
+  four services do not build four times, and the `build`/`target` keys themselves — 11.1"*. **Every
+  service that runs our code carries both its own `build:` block and an explicit `image:` tag**, and
+  there are two tags across the five:
+
+  ```yaml
+  api     { build: {context: ., target: runtime}, image: pizza-runtime }
+  worker  { build: {context: ., target: runtime}, image: pizza-runtime }
+  schema  { build: {context: ., target: runtime}, image: pizza-runtime }
+  cli     { build: {context: ., target: runtime}, image: pizza-runtime }
+  tests   { build: {context: ., target: test},    image: pizza-test    }
+  ```
+
+  The shared tag is what makes "one image" a fact rather than an expectation; the repeated `build:`
+  is what makes every service buildable on its own.
+
+  *Rejected — one service declaring `build:` and the rest naming the tag alone.* Four lines shorter,
+  and it breaks a command the README promises. A service carrying `image:` without `build:` whose
+  image is not on the machine sends Docker to a registry, and `pizza-runtime` is in none. 9.3 hands
+  the reviewer `docker compose run --rm cli`; on a clean clone before the first `up` — which is when
+  somebody reads a README in order — that fails on a failed pull instead of starting the CLI.
+  *Rejected — a YAML anchor* (`x-runtime: &runtime`) folding the repetition away. It would merge
+  four lines into services that already differ in `command`, `environment`, `depends_on`, `restart`
+  and `profiles`, compressing the smallest part of each at the cost of one indirection before a
+  reader knows what a service actually is.
+  *Rejected — `attach: false` on `postgres` and `rabbitmq`*, which 9.3 left open here. It would keep
+  RabbitMQ's startup banner out of the stream 11.3 prints its PASS/FAIL summary into. Declined on
+  three counts: it hides the infrastructure logs in exactly the case where they are the diagnosis, a
+  stack that does not come up; it asserts a Compose version floor before 11.10 has set one, where
+  9.3's `profiles` assumption at least names 11.10 as its confirmation; and 11.3 already owns making
+  that summary unmissable, which is a property of the summary rather than of the log stream.
+  *Rejected — a declared network.* Compose's default network already resolves a service by its name,
+  which is what 10.1's three URLs assume. Declaring one adds lines and changes no behaviour.
+
+  *What this item does not own:* `depends_on`, its conditions, and every healthcheck — 11.2.
+  Published ports — 11.8. `restart` — 11.11. The `command` each service runs, including the
+  exec-form requirement 8.8 hands on — 11.9, so that one form is fixed in one place. The
+  `environment:` blocks are none of these: they transcribe 10.1's table, which 10.3 already left to
+  U9 by name.
+  *Source:* R14, R15. *Constrained by:* 2.1, 2.2, 3.7, 4.6, 9.3, 10.1, 10.3, 11.3, 11.4.
+  *Constrains:* 11.2, 11.9. *Realised in:* U9.
 
 - **11.3 How the test suite is auto-executed.** `[decided]`
   *Decision:* a **one-shot test service** in compose that waits for the stack to be healthy
