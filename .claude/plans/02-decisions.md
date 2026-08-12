@@ -675,7 +675,7 @@ and Part 4 of `03-roadmap.md`).
   │
   ├── infrastructure/       # layer 3, driven — imports: application, domain, libraries
   │   ├── db/                  models, repositories, unit of work, outbox, schema creation (4.6)
-  │   ├── broker/              publisher, topology declaration
+  │   ├── broker/              publisher, topology declaration, serialization (7.3)
   │   └── clock.py             SystemClock
   │
   └── entrypoints/          # layer 3, driving — imports: application; wires only at main.py
@@ -906,7 +906,7 @@ and Part 4 of `03-roadmap.md`).
   alternative — the entity appending events, the use case draining them — would force `domain/`,
   but reaching it means reopening 3.2 and giving entities the mutable buffer 3.5 and 2.4 both
   rule out. *This corrects U6*, which held the type and cannot: `application/` may not import
-  `infrastructure`. U6 keeps serialization (7.3).
+  `infrastructure`. Serialization is untouched by this and stays there (7.3), where U5 writes it.
 
   *Why no read port, though 2.5 said one was needed.* Its actual requirement — `queries.py`
   never touching `infrastructure` — is met through the `UnitOfWork`. A **new** port is what is
@@ -1991,6 +1991,13 @@ and Part 4 of `03-roadmap.md`).
   hyphenated string and `datetime` is ISO 8601 with an explicit offset, both already fixed by 4.7
   and 4.8.
 
+  *U5 writes the module, not U6.* The outbox row needs `serialize` and U5 does not depend on U6,
+  so the unit that reaches it first builds it; the publisher (U6) and the consumer (U8) import it
+  afterwards. It stays under `broker/` because the format is the wire contract and not a general
+  one — the outbox stores a copy of the message, and `deserialize` has no reader but the consumer.
+  That makes `db/ → broker/` an edge inside layer 3, which 3.1's checkable rule does not cover and
+  no lint catches; it is written here so that it is not later read as drift.
+
   *The same function produces both copies*, the wire message and the stored `payload`. That is the
   whole point of the outbox row: it is evidence of what was meant to go out, and two functions
   producing approximately the same thing would make it a guess. The database adapter writes
@@ -2017,8 +2024,15 @@ and Part 4 of `03-roadmap.md`).
   question ever asked of the table is which orders lost their dispatch, and `jsonb` makes it a
   single query; the byte-exactness `text` preserves has no consumer, since FW2's relay rebuilds
   the message from the content and whitespace is not the content.
+  *Revisit if:* a caller needs `OrderReadyEvent` in JSON for a purpose of its own — displaying,
+  reporting, exporting — rather than as the message going onto the wire or the one that came off
+  it. Reading the stored copy is not the test: FW2's relay does exactly that and still has only
+  the wire as its purpose. What changes is that the format acquires a second author, and the
+  module moves to `infrastructure/serialization.py`. **If persistence arrives with such a reader
+  (A19, FW13), the no-version decision above reopens with it** — a stored row can outlive the code
+  that wrote it, which a wire message never does.
   *Source:* R5, R6. *Constrained by:* 3.1, 3.4, 4.7, 4.8, 7.2. *Constrains:* 7.7, 8.4.
-  *Recommends to:* 4.5. *Realised in:* U6.
+  *Recommends to:* 4.5. *Realised in:* U5 (the module), U6 (the wire).
 
 - **7.4 Durability.** `[decided]`
   *Decision:* **durable exchanges, durable queues, persistent messages** (`delivery_mode=2`).
