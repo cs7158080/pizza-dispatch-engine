@@ -165,10 +165,10 @@ inside a decided record. Anything of the second kind became commit A before this
   the factory and `__exit__` closes it. The repositories are built inside `__enter__` bound to that
   session, because they cannot outlive it. The factory is built once per process at the composition
   root, which is 2.5's sample and U7's and U8's work.
-- **R-k — PostgreSQL column types are named directly.** `UUID(as_uuid=True)`, `JSONB` and
-  `TIMESTAMP(timezone=True)` from `sqlalchemy.dialects.postgresql`. 2.2 fixed the database and 4.5
-  fixed `jsonb` and `timestamptz`; a portable spelling would describe a portability nothing asks
-  for and would not produce the schema 4.5 decided.
+- **R-k — PostgreSQL column types are named directly.** `UUID(as_uuid=True)`, `ARRAY(Text)`,
+  `JSONB` and `TIMESTAMP(timezone=True)` from `sqlalchemy.dialects.postgresql`. 2.2 fixed the
+  database and 4.5 fixed `text[]`, `jsonb` and `timestamptz`; a portable spelling would describe a
+  portability nothing asks for and would not produce the schema 4.5 decided.
 
 ## 6. Steps
 

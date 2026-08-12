@@ -15,7 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Text, text
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -39,7 +39,7 @@ class OrderModel(Base):
     id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
     customer_name: Mapped[str] = mapped_column(Text, nullable=False)
     address: Mapped[str] = mapped_column(Text, nullable=False)
-    items: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    items: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     assignment_state: Mapped[str] = mapped_column(Text, nullable=False)
     driver_id: Mapped[UUID | None] = mapped_column(

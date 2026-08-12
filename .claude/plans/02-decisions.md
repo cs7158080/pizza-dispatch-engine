@@ -1271,10 +1271,15 @@ and Part 4 of `03-roadmap.md`).
   values and had the mapper write `.value`, so the column holds that string and the repository owns
   the conversion — no ORM-level enum type is involved in either direction.
 
-  *`items` as `jsonb`, and this is the most arbitrary line in the record.* `text[]` describes the
-  data more precisely and is equally well supported; `jsonb` wins only on there being one such type
-  in the schema rather than two, since `payload` needs it. Nothing reads `items` (4.2), so no query
-  distinguishes them.
+  *`items` as `text[]`.* The column says what the data is, and the annotation the repository already
+  carries — `Mapped[list[str]]` — becomes a statement the database enforces rather than one it
+  merely permits: `jsonb` accepts an object, a number or a scalar in that column, and nothing would
+  notice. The earlier tie-breaker, one JSON type in the schema instead of two, is withdrawn: it
+  counted type names rather than concepts, and `payload` is a document while `items` is a list of
+  strings whichever spelling is chosen. Nothing reads `items` (4.2), so no query distinguishes them
+  and this is a statement about correctness at the boundary, not about access.
+  *Rejected:* **`jsonb`** — above. **`VARCHAR(n)` on the text columns** stays rejected for the
+  reason below: a type does not drift, a bound written twice does.
 
   *`payload` as `jsonb` — 7.3's recommendation, accepted on its own argument.* The single question
   the table is ever asked is which orders lost their dispatch, and 7.2 gives the row no `order_id`
