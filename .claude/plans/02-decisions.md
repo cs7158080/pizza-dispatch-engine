@@ -22,7 +22,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 3 — Architecture and layering | 3.1–3.8 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
-| 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
+| 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **82** | **28** |
+| **Total** | **87** | **23** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -875,6 +875,7 @@ and Part 4 of `03-roadmap.md`).
   class OrderRepository(Protocol):
       def add(self, order: Order) -> None: ...       # returns nothing — 4.7
       def get(self, order_id: UUID) -> Order | None: ...
+      def get_for_update(self, order_id: UUID) -> Order | None: ...   # 6.9 — write paths only
       def save(self, order: Order) -> None: ...
       def list_all(self) -> list[Order]: ...         # newest first; docstring carries it
 
@@ -947,8 +948,11 @@ and Part 4 of `03-roadmap.md`).
   and saves in the same transaction (8.9). **No lifecycle on `EventPublisher`** — the composition
   root holds the concrete adapter (3.1) — which *constrains* 7.7 rather than waiting on it.
 
+  *Amended by 6.9 on 2026-08-11:* `OrderRepository` gains `get_for_update`, taking a row lock for the
+  status-update path. It is a second method rather than a flag on `get`, so that the read paths above
+  cannot acquire a lock by accident.
   *Source:* `CLAUDE.md` §3 ("explicit typed boundaries"), §2 Phase 3. *Constrained by:* 2.4, 2.5,
-  3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
+  3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 6.9, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
   2.5's "a port of its own", 4.7's sample line. *Realised in:* U3.
 
 - **3.5 Transaction ownership.** `[decided]`
@@ -1438,7 +1442,7 @@ and Part 4 of `03-roadmap.md`).
   with self._uow as uow:
       uow.orders.add(order)                # add returns None
       uow.commit()
-  return order.id                          # known before the transaction opened
+  return order                             # its id was known before the transaction opened
   ```
 
   *Why not a sequential integer — the alternative at its real strength.* It is genuinely easier
@@ -1490,6 +1494,11 @@ and Part 4 of `03-roadmap.md`).
   in the same change. *Removes* the id generator from the list of ports 3.4 defines.
   *Left to 3.4:* whether signatures name `UUID` directly or a `NewType` per entity — a question
   about the typed boundary, which is 3.4's subject.
+  *Corrected by 6.1 on 2026-08-11:* the sample's last line was `return order.id`, and `POST /orders`
+  responds with the whole order, so `place_order` returns the entity. The line is amended in place
+  rather than annotated, because it is code a reader would copy. The identifier scheme this item
+  decides is unchanged — the id is still known before the transaction opens, which is what the line
+  was written to show.
   *Source:* R1, R4, R11, R12. *Constrained by:* 2.5, 3.1, 3.5, 4.8, 7.5. *Constrains:* 3.4, 4.1,
   4.5, 4.6, 7.2.
   *Revisit if:* a test needs to predict an identifier, or an identifier acquires business meaning —
@@ -1778,6 +1787,189 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 6 — API contract
 
+- **6.1 Request and response schemas.** `[decided]`
+  *Decision:* **three request schemas and four response schemas.** Every request model is declared
+  `extra="forbid"` (2.3), and every violation returns `422` (4.2).
+
+  | Endpoint | Request | Response |
+  |---|---|---|
+  | `POST /orders` | `CreateOrderRequest` — `customer_name`, `address`, `items`; the bounds are 4.2's | `OrderResponse` |
+  | `PATCH /orders/{id}/status` | `UpdateStatusRequest` — `status` only | `OrderResponse` |
+  | `GET /orders/{id}` | — | `OrderResponse` |
+  | `GET /orders` | — | `list[OrderSummary]` |
+  | `POST /drivers` | `RegisterDriverRequest` — `name` only (6.4), 1 to 100 characters | `DriverResponse` |
+  | `GET /health` | — | `{"status": "ok"}` |
+
+  **`OrderResponse`** — nine keys: `id`, `customer_name`, `address`, `items`, `status`,
+  `assignment_state`, `assigned_at`, `created_at`, `driver`. Exactly 4.1's nine entity fields, with
+  `driver_id` **replaced by** 6.5's nested object rather than carried alongside it — 13.6's line,
+  that a fact written in two places eventually disagrees with itself, applies to a JSON document as
+  much as to this file.
+  **`OrderSummary`** — 6.6's five fields, unchanged.
+  **`DriverResponse`** — `{id, name, status}`, and it **is** 6.5's nested object: one schema serves
+  both the registration response and the nesting. `drivers.created_at` stays in the entity as 5.4's
+  tie-breaker and never leaves the system — delete it from the response and no named DoD row fails
+  (1.1).
+
+  *`POST /orders` returns the whole order, and this corrects 4.7.* That record's sample has the use
+  case `return order.id`; `place_order` returns the `Order`, and `register_driver` the `Driver`.
+  The reason is 1.2's step 3 — placing an order shows `RECEIVED` and `PENDING` — which under an
+  id-only response costs a second round trip for a fact the server has just written. 4.7's own
+  subject, the identifier scheme, is untouched.
+  *Rejected:* **`201` with `{"id": …}` and a `Location` header** — the orthodox REST shape, and it
+  buys conformance while charging that round trip on a path that is itself a graded row. Status
+  codes are 6.2's subject, not this item's.
+
+  *Two smaller calls.* **Timestamps are not pinned to a spelling.** The contract is ISO 8601 with an
+  explicit UTC offset — Pydantic v2's default, no custom serializer — and 12.3's assertions are on
+  presence and on `null`. Pinning the final character buys nothing and invites a test that breaks on
+  a library upgrade. **Status values match exactly, in upper case.** 4.9's `Enum` carries explicit
+  string values and Pydantic rejects anything else with `422`, which is precisely 5.2's "an
+  unrecognised status string never reaches the core". Case-insensitive parsing would be hand-written
+  leniency in a contract with no client that needs it.
+
+  *Handed to 6.3:* the `503` body of `GET /health`. It is not a domain error, so 5.2's table does
+  not reach it and this item does not decide it.
+  *Recorded as an assumption:* the brief specifies no response body for `POST /orders` or
+  `PATCH /orders/{id}/status` — **A27**.
+  *Source:* R1–R4, R11, R18. *Constrained by:* 4.1, 4.2, 4.3, 4.7, 6.4, 6.5, 6.6, 7.6.
+  *Corrects:* 4.7's sample line. *Constrains:* 6.2, 6.3. *Realised in:* U7.
+
+- **6.2 Status codes.** `[decided]`
+  *Decision:* **eight rows, and no deliberate `5xx` anywhere in the system.**
+
+  | Case | Code | Produced by |
+  |---|---|---|
+  | `POST /orders` succeeds | `201` | the router |
+  | `POST /drivers` succeeds | `201` | the router |
+  | `PATCH /orders/{id}/status` succeeds | `200`, carrying the order (6.1) | the router — 7.6 holds this even when the publish failed |
+  | `GET /orders/{id}`, `GET /orders` | `200` | the router |
+  | Order id well-formed but not found | `404` | `OrderNotFound` → `errors.py`'s table (3.1, 3.4) |
+  | Illegal transition | `409` | `IllegalTransition` → the same table (5.2) |
+  | Validation failure — unknown field, bound exceeded, unrecognised status value, malformed UUID in the path | `422` | Pydantic, before the core sees anything (4.2, 5.2) |
+  | `GET /health` cannot reach the database | `503` | the router (6.6) |
+
+  *`201`, and still no `Location` header.* 6.1 rejected the orthodox creation shape on the round
+  trip its header costs, not on the code. The code costs a `status_code=201` argument and is simply
+  the accurate one. *Rejected:* a uniform `200` for every success — the only consumer it would
+  simplify is the CLI, which does not branch on a success code.
+
+  *`PATCH` returns `200` with a body, and `204` is rejected on one fact.* `204` forbids a body, so
+  the code and the body are a single question. The usual argument for a body — a saved round trip —
+  is weak here, since 1.2's demo re-reads the order separately at steps 9 and 12. The argument that
+  holds is `assignment_state`: 4.9 writes `COMPLETED` on the transition into `DELIVERED` **unless the
+  state is `FAILED`, which survives**, so the response to a `PATCH` carries a fact the client did not
+  send and cannot compute — whether a driver was ever dispatched. That is precisely the second axis
+  4.4 exists to express, and `204` would blank it at the moment it is written. Secondary: 6.1 gives
+  `POST`, `PATCH` and `GET` one response schema, and `204` would make `PATCH` the sole exception;
+  12.3's HTTP-only suite would pay a second call for every assertion on a transition's result.
+  *What `204` genuinely buys* is semantic precision when the server has nothing to say. Here it has
+  something to say.
+  **This fills a gap rather than restating one.** 7.6 states `200` with the updated order but argues
+  only why not `5xx`, and 6.1 carried the body into its schema table without defending it. The
+  developer's question surfaced that the body had been written three times and reasoned zero times.
+
+  *`422`, not `404`, for a malformed identifier in the path.* `GET /orders/banana` fails FastAPI's
+  own path-parameter validation, which is the same mechanism, in the same layer, that rejects
+  `{"status": "FLYING"}`. It keeps 5.2's line intact: **malformed input is `422`; a well-formed
+  request the rules refuse is not.** *Rejected:* overriding it to `404` — the reasonable opposite
+  reading, "nothing lives at this URL", and it collapses a garbage identifier and a real-but-absent
+  one into one answer, at the cost of hand-written code to achieve it. Recorded here because it is
+  the one row where a reviewer may expect `404` and receive `422`.
+
+  *"Unknown driver" has no code, because it has no endpoint.* The inventory named it alongside the
+  other three failures; 6.6 has since closed the endpoint list, and no path accepts a driver id —
+  `POST /drivers` supplies one. The failure mode does not exist rather than being left uncoded. It
+  enters this table as `404` if FW3 is ever built.
+
+  *No deliberate `5xx`.* 7.6 already refuses one for an unreachable broker, and nothing else in the
+  design produces a server-side failure by design. An unhandled exception yields FastAPI's `500`,
+  and that is **a defect, not a contract** — stated in those words so that a `500` in a test run
+  reads as a bug rather than as a covered path.
+  *Source:* R1–R4, R18. *Constrained by:* 4.2, 4.4, 4.9, 5.2, 6.1, 6.6, 7.6. *Completes:* 7.6's
+  unargued body. *Constrains:* 6.3, 12.2. *Defines:* F1, F13. *Realised in:* U7.
+
+- **6.3 Error response body format.** `[decided]`
+  *Decision:* **one key — `detail` — on every error response, no envelope, and no override of
+  FastAPI's validation handler.** `404`, `409` and `503` are declared in the OpenAPI document
+  through constants that sit beside the mapping table in `errors.py`.
+
+  | Code | Body |
+  |---|---|
+  | `404` | `{"detail": "Order <id> not found"}` |
+  | `409` | `{"detail": "Cannot advance order from BAKING to PREPARING"}` |
+  | `422` | Pydantic's structured list, unchanged |
+  | `503` | `{"detail": "Database unreachable"}` |
+
+  *The item's premise was false, and that is what it actually decides.* It offers a choice between
+  "one consistent shape" and "the framework default" — but **FastAPI has two defaults, differing in
+  type, not merely in wording**: `HTTPException` produces `{"detail": <string>}`, while a validation
+  failure produces `{"detail": [<object>, …]}` carrying `loc`, `msg` and `type` per field. Accepting
+  the defaults is therefore not automatically consistent, and imposing one shape means overriding
+  the handler for `RequestValidationError`. The item was framed as a cheap choice between two
+  options; it is a choice between two costs.
+
+  *What the chosen consistency asserts, stated exactly:* **one key on every error, whose type varies
+  with the class of failure** — a string where the server can state a sentence, a list where the
+  failure is per-field and there may be several. That is not the absence of a decision: it is 5.2's
+  own distinction, between malformed input and a well-formed request the rules refuse, made visible
+  in the body rather than only in the code.
+
+  *Rejected — **an envelope** (`{"error": {"code": …, "message": …}}`).* The orthodox choice and the
+  strongest alternative. It fails on **information**: Pydantic's `422` says which field failed and
+  why, per field, and squeezing it into an envelope means either discarding that detail or nesting
+  it inside — at which point the envelope has unified the outer key only, which is the thing it
+  existed to do. Its other payoff, a machine-readable code, has no consumer: 3.6 made the CLI a thin
+  adapter that branches on the HTTP status.
+  *Rejected — **RFC 7807 / `application/problem+json`***. The standard-blessed shape (`type`,
+  `title`, `status`, `detail`), carrying every cost of the envelope plus a media type nothing in
+  this stack negotiates. A standard adopted without a consumer is decoration.
+  *Rejected — **a separate `code` field***. 1.1's ceiling test: delete it and no named DoD row
+  fails. Every status maps to exactly one domain error today — `404` is `OrderNotFound`, `409` is
+  `IllegalTransition` — so `code` restates a number already in the response.
+  *Rejected — **structured `from` / `to` keys on the `409`***. The only consumer prints them; a
+  sentence does the same work without a second schema.
+
+  *Why the message names both statuses.* The one argument here resting on a graded row rather than
+  on taste: R11 is marked "an easy-to-use console client", and this string is what its user reads.
+  *"Cannot advance order from BAKING to PREPARING"* tells them what to do next; *"Illegal
+  transition"* makes them guess. 5.2 already puts both values on the domain error, so this is
+  message design, not data collection.
+
+  *The OpenAPI declaration, and the duplication the developer caught.* FastAPI generates the `422`
+  schema itself and documents the success body from `response_model`, but **`404` and `409` reach
+  the document only if a route declares them** — they are produced at runtime by `errors.py`'s
+  handler, and nothing on the route mentions them. This is true under any body format, so it is not
+  an argument for or against an envelope. Left undeclared, the document states that the operation
+  returns `200` or `422` — not incomplete but **inaccurate**, against precisely the property 2.3
+  bought FastAPI for.
+  **The first form of this decision put a literal dict on each route, and called it free. It is
+  not.** The status number would then be written both where it executes (`_STATUS`) and where it is
+  described, and a later remapping would leave the document asserting the old code with nothing to
+  catch it — 13.6's line, which 6.1 had invoked two items earlier to reject `driver_id` beside the
+  nested driver. The rule was applied to one item and ignored in the next.
+  *The form that ships:* named constants declared beside the table that produces the behaviour, and
+  composed per route.
+
+  ```python
+  # entrypoints/api/errors.py
+  _STATUS   = {OrderNotFound: 404, IllegalTransition: 409}
+  NOT_FOUND = {404: {"description": "Order not found"}}
+  CONFLICT  = {409: {"description": "Illegal transition"}}
+  ```
+
+  The number is written once, in one file, two lines apart. What stays on the route is which
+  failures belong to it — genuine per-route information: `POST /orders` takes neither,
+  `GET /orders/{id}` takes `NOT_FOUND`, `PATCH` takes both.
+  *Rejected — **declaring nothing***. It removes the duplication completely and leaves the contract
+  document wrong. An inaccuracy neutralised by one constant beats one left standing.
+
+  *Closes 6.1's hand-off:* the `503` body of `GET /health` carries the same key. It is not a domain
+  error and does not pass through the handler, but it is written by hand in one route and there is
+  no reason for it to look different.
+  *Source:* `CLAUDE.md` §6, R11, R18. *Constrained by:* 2.3, 3.1, 3.6, 5.2, 6.1, 6.2.
+  *Constrains:* 9.4, 12.2. *Realised in:* U7.
+
 - **6.4 Driver registration payload.** `[decided]`
   *Decision:* the request body carries **no status field**. Every driver is registered
   `AVAILABLE`. The response — and every later read — includes `status`, whose only two values
@@ -1871,6 +2063,17 @@ and Part 4 of `03-roadmap.md`).
   startup ordering, not runtime restarts.
   *Source:* R11, R14, `CLAUDE.md` §6, 1.1. *Answers:* Q11, Q12.
 
+- **6.7 Path prefix and versioning.** `[decided]`
+  *Decision:* **no prefix.** The paths are R1–R4's own — `/orders`, `/orders/{id}`,
+  `/orders/{id}/status`, `/drivers` — plus `/orders` for the list and `/health` (6.6). There is **no
+  versioning**, and its absence is a decision rather than an omission: a second version answers a
+  contract change, which nothing here anticipates, so it is not a Part 5 entry either.
+  *Why:* the brief writes the paths literally, and a prefix would make the delivered API differ from
+  the text a reviewer compares it against.
+  *Rejected:* `/api/v1` — the convention, buying a migration path for consumers that do not exist;
+  `/api` alone — the prefix's cost without its purpose.
+  *Source:* R1–R4, R19. *Constrains:* 9.4, 12.2, 13.1. *Realised in:* U7.
+
 - **6.8 Authentication.** `[decided]`
   *Decision:* **none.** Every endpoint is open. Recorded in the README under assumptions:
   *"There is no authentication. The API targets an internal network and a demonstration
@@ -1879,6 +2082,78 @@ and Part 4 of `03-roadmap.md`).
   would be an unrequested feature (`CLAUDE.md` §6); leaving it unmentioned would be an
   unstated assumption (§7). Stating the absence satisfies both.
   *Source:* `CLAUDE.md` §7. *Answers:* Q15. *Deferred to:* FW9.
+
+
+- **6.9 Concurrent `PATCH` behaviour.** `[decided]`
+  *Decision:* the write path reads the order with **`SELECT … FOR UPDATE`**. The second request
+  blocks, re-reads the committed status, and `advance_to` refuses it — **`409`**, through 5.2's
+  existing mapping. Read paths are untouched and take no lock.
+
+  *The scenario is real, not hypothetical.* 2.4 chose a synchronous runtime, and FastAPI serves `def`
+  handlers from a thread pool, so two simultaneous requests genuinely run in parallel, each in its
+  own transaction (3.5). Under PostgreSQL's default `READ COMMITTED`:
+
+  | | T1 | T2 |
+  |---|---|---|
+  | 1 | reads `PREPARING` | |
+  | 2 | | reads `PREPARING` |
+  | 3 | `advance_to(BAKING)` passes | |
+  | 4 | | `advance_to(BAKING)` passes — in memory, on a stale copy |
+  | 5 | `UPDATE`, commit | |
+  | 6 | | `UPDATE` (blocked until 5, then rewrites `BAKING`), commit |
+
+  Both return `200` and **two `ORDER_READY` events are published**, where serial execution yields
+  `200` then `409`.
+
+  *Stated precisely, the end state is not corrupted.* 5.1 makes transitions linear and single-step,
+  so two concurrent updates on one order can only ever request the **same** next status — anything
+  else fails in memory regardless of timing. The anomaly is a **duplicated side effect, not a wrong
+  state**, and it lands on the one path 5.5 already made idempotent by design (A2).
+
+  *The one interleaving that does corrupt state, and it is why this item is not "accept it".* The
+  transition into `DELIVERED` also releases the driver (5.6). Two concurrent `DELIVERED` requests on
+  one order, with a worker claim landing between them: T1 releases driver D → the worker claims D
+  for order Y and marks it `BUSY` → T2, holding the older read, writes `AVAILABLE`. D is now
+  assigned to Y and advertised as free, so it can be dispatched twice — the rule A13 states.
+  **4.5's uniqueness constraint does not catch it:** the damage is in `drivers.status`, the
+  denormalised copy 4.3 already recorded as unprotectable, since PostgreSQL has no cross-table
+  `CHECK`. It is the ghost driver of 4.3 with the sign reversed.
+
+  *Why this option and not another — the property that makes it cheap.* The answer to "what happens
+  on a concurrent `PATCH`" becomes **"exactly what happens on a sequential one"**. No new status
+  code, no new row in 6.2's table, no new message for the CLI to render (6.3), no new code path. The
+  cost is **one method on the port** — `get_for_update` beside `get` in `OrderRepository` (3.4) —
+  used by the write path only, while `queries.py` and 6.5's two keyed reads keep `get`. It
+  introduces no new concept: 8.9 already brought `FOR UPDATE SKIP LOCKED` into the system, and 3.4
+  already carries one locking method.
+
+  *Rejected — **accepting the anomaly***. The argument for it is genuine: no delivered consumer
+  produces concurrent `PATCH`es — the CLI is one interactive user (9.2), and 12.3's scenario table
+  races **drivers** (F2), not statuses — so under 1.1's ceiling test the protection is not built. It
+  is rejected because **8.9 already refused this exact argument in this exact system**, that safety
+  must not rest on a deployment accident, and because the driver-release window above breaks a
+  stated rule rather than merely duplicating a harmless event.
+  *Rejected — **optimistic locking with a `version` column***. It adds a column to the schema, a
+  `version_id_col` configuration, and a fresh decision about what the API returns on a version
+  conflict. It buys throughput under contention this system does not have. **It would also have
+  moved this branch's merge ahead of U5**, since the column is 4.5's subject.
+  *Rejected — **a `CHECK` constraint***. It cannot compare against the previous value; expressing
+  the rule needs a trigger, which 4.3 already declined for the same reason.
+
+  *Nothing is handed to 4.5.* `SELECT … FOR UPDATE` is runtime behaviour — no column, no index, no
+  constraint — so U5's open items are unaffected and this branch merges on the ordinary schedule.
+
+  *One constraint handed to U8, recorded rather than assumed.* There is a lock-ordering question
+  here: the API locks an order and may then touch a driver, while the worker locks a driver and then
+  updates an order — an inversion, which is the standard shape of a deadlock. It does not bite,
+  because an order cannot simultaneously be assigned (the API releasing) and unassigned (the worker
+  dispatching). **That rests on `dispatch_order` reading the order before claiming a driver**, which
+  no item has fixed. 8.9 now carries the pointer.
+
+  *Not decided here:* whether F14 becomes a test scenario. This item makes it HTTP-observable — one
+  `200`, one `409` — and therefore a candidate; 12.1 chooses, and it is U10's item.
+  *Source:* R2, `CLAUDE.md` §5. *Constrained by:* 2.4, 2.5, 3.5, 4.3, 5.1, 5.2, 5.5, 5.6, 8.9.
+  *Constrains:* 3.4, 8.9. *Defines:* F14. *Realised in:* U7.
 
 
 ## Topic 7 — Broker contract
@@ -2201,6 +2476,11 @@ and Part 4 of `03-roadmap.md`).
   so that transition occurs on an ordinary path regardless; 4.4 is amended accordingly.
   **The decision is unaffected** — it stands on the second argument, that `PENDING` on an order whose
   status has advanced already reads as "no driver is coming".
+  *The body was asserted here, not argued — 6.2 supplies the argument, 2026-08-11.* Everything above
+  defends the **code**, `200` rather than `5xx`. That the response also carries the updated order was
+  stated in the first line and never justified, and 6.1 then carried it into its schema table on the
+  same footing. 6.2 rejects `204` explicitly, on `assignment_state`: 4.9 lets `FAILED` survive the
+  transition into `DELIVERED`, so the response holds a fact the client did not send.
   *Source:* R5, `CLAUDE.md` §5. *Answers:* Q21. *Defines:* F4 with 7.5.
 
 - **7.7 Connection lifecycle.** `[decided]`
@@ -2456,7 +2736,12 @@ and Part 4 of `03-roadmap.md`).
   silently the moment anyone scales the worker, including a reviewer running
   `--scale worker=2`; advisory locks — a second locking concept for no gain; an optimistic
   read-then-update retry loop — more code and more failure paths than the database primitive.
-  *Source:* R8, DoD. *Answers:* Q13. *Defines:* F2. *Constrained by A1.*
+  *Lock ordering, handed here by 6.9 on 2026-08-11.* The API locks an order and may then touch a
+  driver; this claim locks a driver and then updates an order — an inversion, and the standard shape
+  of a deadlock. It is unreachable only because an order cannot be assigned and unassigned at once,
+  **which rests on `dispatch_order` reading the order before claiming a driver**. U8 implements that
+  order deliberately; it is not free.
+  *Source:* R8, DoD. *Answers:* Q13. *Defines:* F2. *Constrained by A1.* *Constrained by:* 6.9.
 
 
 ## Topic 9 — CLI
@@ -3322,6 +3607,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A24** † | "Microservice" means separate processes and containers, not separate codebases — the API and the worker are two entrypoints into one package over one database | 3.3 |
 | **A25** † | The local credentials are non-secret committed defaults for a disposable environment; a real deployment supplies its own | 10.5 |
 | **A26** | Every configuration value comes from the environment, and `docker-compose.yml` is the only place a default is written | 10.1, 10.2 |
+| **A27** | `POST /orders` and `PATCH /orders/{id}/status` return the full order representation; the brief specifies no response body for either | 6.1 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".
 It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the structure is now
