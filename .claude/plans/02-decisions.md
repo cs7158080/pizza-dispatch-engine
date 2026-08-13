@@ -27,11 +27,11 @@ status markers, precisely so that this table cannot be contradicted.
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
-| 11 — Docker Compose | 11.1–11.7, 11.9 | 11.8, 11.10, 11.11 |
+| 11 — Docker Compose | 11.1–11.7, 11.9, 11.11 | 11.8, 11.10 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **85** | **25** |
+| **Total** | **86** | **24** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3089,6 +3089,50 @@ and Part 4 of `03-roadmap.md`).
   *Source:* R14, DoD "Docker Deployment". *Constrained by:* 2.5, 2.9, 2.10, 3.3, 3.7, 8.8, 10.4,
   11.1, 11.3. *Extends:* 8.8's exec-form requirement to Compose's `command:`. *Leaves to U11:* the
   `tests` command (12.9). *Realised in:* U9.
+
+- **11.11 Restart policies.** `[decided]`
+  *Decision:* **`on-failure`, uncapped, on the four services meant to stay up; nothing written on the
+  three one-shots.**
+
+  | Service | `restart` |
+  |---|---|
+  | `postgres`, `rabbitmq`, `api`, `worker` | `on-failure` |
+  | `schema`, `tests`, `cli` | the default — the key is absent |
+
+  *This is what 8.8 handed here as a requirement:* the worker's resilience **is** this policy, since
+  nothing in its code retries a broker it cannot reach.
+  *Why `on-failure` and not `always`:* 8.8 gave the exit code a meaning — `0` *"separates 'leave me'
+  from 'restart me'"*. `on-failure` is the only value that honours it; `always` would restart a
+  successful exit too and erase a distinction another record built on purpose.
+  *Why uncapped:* 11.2 already prevents the startup crash-loop, since the worker does not start until
+  the broker is healthy. What remains is a broker that dies later, and a cap would abandon one that
+  comes back after the last attempt. Docker's own increasing delay between attempts is what bounds
+  the cost, and 8.8 named it.
+  *Recorded because it is the obvious worry and it does not apply:* a restart loop cannot mask a bug
+  of ours. 8.4 catches every exception inside the consumer callback and ends in a `reject`, so the
+  process does not fall over — a worker that exited means infrastructure.
+
+  *The same policy on the API and the two vendor services*, as one rule rather than three. 2.5
+  already assumed it, naming *"a database container restart (11.11)"* as one of the cases
+  `pool_pre_ping` exists for. What it buys concretely: a transient crash heals itself, and a
+  permanent one — a rejected environment variable at startup (10.2) — appears as a mounting restart
+  count in `docker compose ps` with the same error repeating in the log, which is diagnosable rather
+  than silent.
+
+  *The three one-shots carry no policy, and for `schema` that is load-bearing rather than tidy.*
+  `depends_on: condition: service_completed_successfully` waits for a successful exit, and a service
+  that restarts never reaches one — the whole stack would hang instead of failing. It is also what
+  4.6 asked for: a failed schema creation should be **one service's clear non-zero exit**, not a
+  loop. For `tests`, a restart would re-run the suite indefinitely and break 11.4's
+  `--exit-code-from tests`, which reads the exit of a service that is expected to stay exited.
+
+  *What this does not cover, stated so nothing is assumed:* a container that is alive and not working.
+  6.6 already recorded the mechanism — plain Compose does not restart an unhealthy container, and a
+  healthcheck only gates `depends_on`. No self-healing exists here for that case and none is built.
+  *Rejected:* **`always`** and **`unless-stopped`** — above; **`on-failure:N`** — above; **a policy on
+  the one-shots** — above.
+  *Source:* R14, DoD "Docker Deployment". *Constrained by:* 2.5, 4.6, 6.6, 8.4, 8.8, 11.2, 11.4.
+  *Holds:* 8.8's restart requirement. *Realised in:* U9.
 
 
 ## Topic 12 — Testing
