@@ -27,11 +27,11 @@ status markers, precisely so that this table cannot be contradicted.
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
-| 11 — Docker Compose | 11.1–11.9, 11.11 | 11.10 |
+| 11 — Docker Compose | 11.1–11.11 | — |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **87** | **23** |
+| **Total** | **88** | **22** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3156,6 +3156,33 @@ and Part 4 of `03-roadmap.md`).
   *Source:* R14, DoD "Docker Deployment". *Constrained by:* 2.5, 2.9, 2.10, 3.3, 3.7, 8.8, 10.4,
   11.1, 11.3. *Extends:* 8.8's exec-form requirement to Compose's `command:`. *Leaves to U11:* the
   `tests` command (12.9). *Realised in:* U9.
+
+- **11.10 Compose command form.** `[decided]`
+  *Decision:* **`docker compose` — the v2 plugin — with a documented prerequisite of
+  v2.24 or later, and no top-level `version:` key in the file.**
+  *Why there is no real alternative:* `docker-compose` v1 is a separate end-of-life Python tool, and
+  none of the three features this design rests on is fully available in it.
+
+  **This item exists to confirm three deferred assumptions and to set the floor 10.3 recorded as
+  missing.** 9.3 assumed v2 for `profiles`, 11.1 for `attach:`, and 11.2 for long-form `depends_on`
+  conditions; all three are confirmed.
+
+  *Where the number comes from, and why it is above the true minimum.* Of the features in use,
+  `attach:` is the newest at **v2.20** — `profiles`, long-form `depends_on` and
+  `service_completed_successfully` are all older, and 11.4's `--exit-code-from` and Compose's
+  `${VAR:-default}` interpolation older still. **v2.24 is named deliberately above that floor**, on
+  two grounds: it is the one Compose version already written in this record (10.3), so the repository
+  states one floor rather than two; and a prerequisite errs safely upward — a reviewer above it loses
+  nothing, while one below it gets a README line instead of an unexplained parse error.
+  *10.3's 2.24 does not itself raise the floor:* it belongs to `env_file: required: false`, which that
+  item **rejected**, and a declined feature sets no requirement.
+  *No top-level `version:` key.* It is a v1 artefact that v2 warns about on every run — one more line
+  in the stream 11.1's `attach: false` exists to keep clean.
+  *What the floor actually does:* it documents rather than constrains, since Docker Desktop has
+  shipped well past it for years. Its value is that an old machine produces a sentence in the README
+  instead of a YAML error that explains nothing.
+  *Source:* R14, R19. *Constrained by:* 10.3, 11.1, 11.2, 11.4, 9.3. *Confirms:* 9.3's, 11.1's and
+  11.2's version assumptions. *Realised in:* U9.
 
 - **11.11 Restart policies.** `[decided]`
   *Decision:* **`on-failure`, uncapped, on the four services meant to stay up; nothing written on the
