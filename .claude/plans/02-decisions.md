@@ -2745,8 +2745,8 @@ and Part 4 of `03-roadmap.md`).
 
   | Service | Image | Named by |
   |---|---|---|
-  | `postgres` | vendor | 2.2; the name by 10.1's `@postgres:5432` |
-  | `rabbitmq` | vendor | 2.1; the name by 10.1's `@rabbitmq:5672` |
+  | `postgres` | `postgres:16` | 2.2; the name by 10.1's `@postgres:5432` |
+  | `rabbitmq` | `rabbitmq:3.13` | 2.1; the name by 10.1's `@rabbitmq:5672` |
   | `schema` | `pizza-runtime`, one-shot | 4.6, which writes both the service and its name |
   | `api` | `pizza-runtime` | 3.7; the name by 10.1's `http://api:8000` |
   | `worker` | `pizza-runtime` | 3.7; the name by 4.6's diagram |
@@ -2758,6 +2758,18 @@ and Part 4 of `03-roadmap.md`).
   one is a change to the record that fixed it, not to this one.
   *The list is closed at seven.* The inventory's "any init/migration service" is one slot and 4.6
   filled it. FW2's relay would be the eighth and is not built.
+
+  *The two vendor tags — a convention, and the pin is not.* **This item left both unwritten when it
+  first closed**, which would have left U9's Phase 3 plan to invent them, and `CLAUDE.md` §2 forbids a
+  plan that contains a decision. Nothing in the design distinguishes recent majors: 8.9's
+  `SKIP LOCKED` and every constraint in 4.5 have been PostgreSQL features for a decade, and 7.1's
+  direct exchanges, dead-lettering and `x-message-ttl` as long in RabbitMQ. So 1.3 gives the choice
+  one line rather than a rationale assembled after the fact, exactly as 2.9 did between Python 3.12
+  and 3.13. **What is decided is the `major.minor` pin itself:** `latest` would hand a reviewer
+  building two months from now a different version from the one this was built against, and 7.1
+  already records the shape that failure takes — an argument change on an existing queue fails with
+  `PRECONDITION_FAILED` (406) and closes the channel. Conservative rather than newest, on 2.9's stated
+  ground that a four-day deliverable does not spend risk on a release it needs nothing from.
 
   **The build arrangement, which 3.7 handed here in one sentence** — *"where the image is tagged so
   four services do not build four times, and the `build`/`target` keys themselves — 11.1"*. **Every
