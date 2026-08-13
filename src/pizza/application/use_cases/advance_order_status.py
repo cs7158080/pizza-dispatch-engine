@@ -16,8 +16,9 @@ from pizza.application.ports import (
     PublishFailed,
     UnitOfWork,
 )
+from pizza.application.queries import OrderDetail
 from pizza.domain.errors import OrderNotFound
-from pizza.domain.order import Order, OrderStatus
+from pizza.domain.order import OrderStatus
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,11 @@ class AdvanceOrderStatus:
         self._clock = clock
         self._publisher = publisher
 
-    def __call__(self, order_id: UUID, requested_status: OrderStatus) -> Order:
-        """Move the order to the requested status and return it.
+    def __call__(self, order_id: UUID, requested_status: OrderStatus) -> OrderDetail:
+        """Move the order to the requested status and return it with its driver.
+
+        The driver is the one the order holds after the transition, so a release
+        is visible in what comes back.
 
         Raises `OrderNotFound`, or `IllegalTransition` when the requested status
         is not the adjacent one.
@@ -47,11 +51,10 @@ class AdvanceOrderStatus:
             result = order.advance_to(requested_status)
             uow.orders.save(order)
 
-            if result.releases_driver and order.driver_id is not None:
-                driver = uow.drivers.get(order.driver_id)
-                if driver is not None:
-                    driver.release()
-                    uow.drivers.save(driver)
+            driver = uow.drivers.get(order.driver_id) if order.driver_id else None
+            if result.releases_driver and driver is not None:
+                driver.release()
+                uow.drivers.save(driver)
 
             if result.must_publish:
                 event = OrderReadyEvent(
@@ -65,7 +68,7 @@ class AdvanceOrderStatus:
         if event is not None:
             self._publish_and_mark(event)
 
-        return order
+        return OrderDetail(order=order, driver=driver)
 
     def _publish_and_mark(self, event: OrderReadyEvent) -> None:
         try:
