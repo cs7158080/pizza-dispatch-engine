@@ -2328,6 +2328,38 @@ and Part 4 of `03-roadmap.md`).
   That makes `db/ → broker/` an edge inside layer 3, which 3.1's checkable rule does not cover and
   no lint catches; it is written here so that it is not later read as drift.
 
+  *Challenged at U8's gate on 2026-08-14, and the placement stands. Recorded in full because both
+  halves of the challenge are correct and the question will be asked again.* It was two questions:
+  why does 8.4's `deserialize_or_none` exist at all, and does this module belong in `application/`,
+  since it imports no broker library.
+  **The wrapper is not an independent design choice — it exists only because of this placement.**
+  The consumer has to tell an undecodable message from every other failure, because 8.4 gives the
+  two opposite dispositions: ack and drop, against reject into 8.2's cycle. To tell them apart it
+  must either name `SerializationError` or receive the distinction as a value, and 3.1 leaves it
+  unable to name one. Hence a value. Were this module reachable from `entrypoints/`, the wrapper
+  would not be written.
+  **And the module would pass for core code on the usual test.** It imports `json`, `datetime`,
+  `uuid` and `application/events.py` and nothing else, so 3.1's own question — can `domain/` and
+  `application/` run with nothing installed but Python — does not discriminate here. The "one
+  format, two sides" argument above is also true of `serialize`, which the publisher and the outbox
+  share, and not of `deserialize`, whose only reader is the consumer.
+  *What keeps it here is a different test: what changes when it changes.* A version envelope, a move
+  to a binary encoding, a renamed key — each is an adapter edit today, and each would become an edit
+  inside `application/` made because a broker's wire format changed. `EventPublisher.publish(event)`
+  is the port and the encoding is the adapter's answer to *as what bytes*; moving the codec inward
+  deletes that line. This item already refused the same move from the other direction when it
+  rejected `OutboxStore.add` taking pre-serialized bytes.
+  *The cost, stated rather than absorbed:* three artifacts exist to cross one boundary — the
+  wrapper, a constructor parameter on the consumer, and one injection in the worker's root. The rule
+  that produces them is written at **directory** granularity, so it catches a pure function over a
+  format, which is not the driven adapter it was aimed at. That granularity is kept for
+  enforceability alone: 3.1 rejected a single `core/` directory on exactly this ground — inside one
+  directory a crossed boundary shows as nothing in a diff and no lint sees it.
+  *Rejected:* **moving the module to `application/`** — above; it also reopens 8.4, which names the
+  wrapper, its signature and its injection. **Moving it to `infrastructure/serialization.py`**, this
+  item's own *Revisit if* target — it answers a different question and leaves the wrapper exactly
+  where it is.
+
   *The same function produces both copies*, the wire message and the stored `payload`. That is the
   whole point of the outbox row: it is evidence of what was meant to go out, and two functions
   producing approximately the same thing would make it a guess. The database adapter writes

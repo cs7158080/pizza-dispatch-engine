@@ -62,8 +62,8 @@ Each line names the item that owns it, so nothing here is silence.
 ## 3. Branch, commits, and the merge
 
 - **Branch:** `feat/u8-dispatch-worker`, cut from `main` at `028b7b9` (14.2).
-- **Commits:** one planning commit, one correction commit, then one commit per step (14.3, 14.4).
-  Six in total.
+- **Commits:** one planning commit, two record commits, then one commit per step (14.3, 14.4).
+  Seven in total.
 - **Merge:** one pull request, squash-merged, its title ending in `(#16)` (14.2, 14.3). The branch
   is not deleted (14.2).
 
@@ -72,6 +72,7 @@ Each line names the item that owns it, so nothing here is silence.
 | B | planning | `docs: plan the dispatch worker` |
 | A | correction | `docs: correct where 8.4's decoding wrapper lands` |
 | 1 | step | `feat: report who took the order, for the line the dispatch logs` |
+| C | amendment | `docs: record why the wire format stays out of the application layer` |
 | 2 | step | `feat: turn undecodable bytes into a value every caller must handle` |
 | 3 | step | `feat: one attempt per message, and what to do with the message after it` |
 | 4 | step | `feat: assemble the dispatch worker` |
@@ -89,6 +90,14 @@ reason the consumer may not name `SerializationError` are 8.4's and are untouche
 branch rather than on a gate branch of its own, by the same ruling that placed U2's commit A, U3's
 commits A to C, U5's commits A and C and U6's commit A. It carries the `docs/ai-log.md` row for the
 same change (§6).
+
+**C is not a plan step either, and it sits where it was raised.** Reviewing step 2 the developer
+asked what `deserialize_or_none` buys, and whether `serialization.py` belongs in `application/`
+given that it imports no broker library. Both halves of that hold — the wrapper is a consequence of
+7.3's placement and of nothing else, and the module does pass 3.1's own test for core code — and
+the placement survives on a different test, which 7.3 did not state. What was missing was the
+justification rather than the decision, so it lands there and not here: step 2 points at it and does
+not restate it.
 
 ## 4. The Definition of Done that applies to every step
 
@@ -264,7 +273,7 @@ def deserialize_or_none(raw: bytes) -> OrderReadyEvent | None:
 ```
 
 It calls `deserialize` and converts `SerializationError` — one declared type, and nothing wider —
-into `None`. That is the seam 7.7 required and 8.4 shaped: the consumer may not import
+into `None`. That is the seam 7.7 required, 8.4 shaped and 7.3 justifies: the consumer may not import
 `SerializationError`, and a signature returning `… | None` forces every caller to handle the case,
 so a bug of ours passes through into 8.4's third class instead of being swallowed here.
 
