@@ -406,8 +406,10 @@ The module ends with `if __name__ == "__main__": main()`, as `entrypoints/schema
    on `stderr` and exits `1`, with no traceback (U2 §8's contract, checked rather than assumed).
    Running it with a complete environment and **no broker** prints one `event=broker_unreachable`
    line and exits non-zero — 8.8's first exit, and the only one observable before U9.
-6. Read from the diff: this is the **second and last** module under `entrypoints/` importing
-   `infrastructure/` (3.1); no `async def` appears anywhere under `src/pizza/` but the API's
+6. Read from the diff: this is the **third and last** module under `entrypoints/` importing
+   `infrastructure/` — 4.6's schema service is one as well, and all three are `main.py`, which is
+   the shape 3.1 draws even though its own sentence still counts two; no `async def` appears
+   anywhere under `src/pizza/` but the API's
    `lifespan` (2.4); `prefetch_count=1` is written here and nowhere else; nothing in this file
    catches a domain error or decides an acknowledgement.
 
@@ -438,6 +440,17 @@ its own even though nothing runs until step 4.
   is legibility and 11.2's to weigh. It touches neither dependency before `main()` runs.
 - **U9 (10.1):** the service supplies all six `PIZZA_` service variables; it reads five of them and
   carries `PIZZA_BROKER_PUBLISH_TIMEOUT_SECONDS` unread, which 10.1 accepted and stated.
+- **U9 (11.2, 8.7) — measured while closing step 4, and handed over for a decision rather than as a
+  fact to inherit.** Every failed connection attempt prints about eight `ERROR` records of `pika`'s
+  own, one of them a traceback, before the single line of ours. That much is decided: 8.7 curates no
+  per-library level, on the ground that a filtered module list is configuration with no reader. What
+  is **not** decided is how it reads in `docker compose up`, where 8.8's note already says the
+  worker will exit and restart a handful of times while RabbitMQ boots — so a reviewer meets that
+  wall several times before the first `event=worker_ready`, in the same stream 11.3 puts the
+  PASS/FAIL summary in. U9 owns both levers and neither is free: `depends_on` on the broker removes
+  most of the restarts and adds the startup coupling 7.1 and 7.7 deliberately deleted, and silencing
+  `pika` reopens 8.7. Measured on Windows against a refused connection; the count is the library's
+  and will hold on Linux.
 - **U10 (12.3, 12.1):** everything this plan marks "read from the diff" becomes observable over
   HTTP. The assignment scenario proves the whole path — publish, topology, consume, claim, ack —
   and F7's exhaustion proves 8.2's cycle and 8.3's terminal state, at the cost of 10.4's 64 seconds.
