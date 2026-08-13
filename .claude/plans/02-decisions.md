@@ -28,10 +28,10 @@ status markers, precisely so that this table cannot be contradicted.
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
-| 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
+| 12 — Testing | 12.1, 12.2, 12.3, 12.7 | 12.4–12.6, 12.8–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **90** | **20** |
+| **Total** | **91** | **19** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3571,6 +3571,46 @@ and Part 4 of `03-roadmap.md`).
   *Hands to 2.6:* one HTTP client, and nothing else; topic 12 adds nothing to 2.10's list.
   *Source:* `CLAUDE.md` §5. *Constrained by:* 6.5, 6.6, 11.6, 11.7. *Constrains:* 2.6, 12.1,
   12.2, 12.4, 12.5. *Feeds:* 13.4.
+
+- **12.7 Directory layout and separate run commands.** `[decided]`
+  *Decision:* **the two directories that already exist, two commands, and no pytest
+  configuration.** §5 asks for separate directories that can be run separately; both halves
+  hold today, so this item confirms a layout rather than choosing one.
+
+  | Path | Holds | Written by |
+  |---|---|---|
+  | `tests/unit/` | the free unit set (12.6), one file per module under test | U2, U3, U5, U6 |
+  | `tests/integration/` | the four scenarios of 12.2, one file | U10 |
+  | `tests/integration/waiting.py` | 12.4's `wait_until` and `stays`, and their three constants | U10 |
+  | `tests/integration/conftest.py` | 12.5's absorbing fixture | U10 |
+
+  Both directories are packages with `__init__.py`; there is no `tests/__init__.py` above them.
+
+  | Command | Runs | In 14.7's list from |
+  |---|---|---|
+  | `pytest tests/unit` | the unit set | U2 |
+  | `pytest tests/integration` | the four scenarios | U11 |
+
+  *Why the helpers sit beside the suite and not in a shared directory:* the unit set imports
+  nothing from them, so `tests/helpers/` would be an abstraction with one consumer. *Why
+  `waiting.py` and not `conftest.py` for both:* the two helpers are called by name, and
+  `conftest.py` is the file pytest loads for what is **not** named — the fixture. Splitting
+  them puts each in the mechanism it actually uses.
+
+  *No `[tool.pytest.ini_options]`, closing the deferral U1 through U5 each filed here.* Its
+  only candidate content is `testpaths`, which applies to a bare `pytest` — and both commands
+  above name a path, so it would never take effect. It would not move the cache either:
+  11.9 copies `pyproject.toml` to `/app`, so `rootdir` is `/app` with or without the section,
+  which is the fact 11.9's `chown app:app /app` already rests on.
+
+  *What this fixes for the compose test service, and what it leaves open:* the path is
+  `tests/integration` and nothing else. Flags, the PASS/FAIL summary and any report file are
+  12.9's, which 11.9 left to U11; whether lint and type checks join that run is 12.10's.
+  *Accepted cost:* 11.9 copies `tests/` whole, so `pizza-test` carries the unit set nobody
+  runs there. §5 requires the categories to be **runnable** separately, not shipped separately.
+  *Source:* `CLAUDE.md` §5. *Constrained by:* 11.9, 12.3, 12.4, 12.5, 14.7. *Constrains:* 12.9.
+  *Realised in:* U10 for the two modules, U11 for the command 14.7 gains — the directories
+  themselves have been on `main` since U1.
 
 
 ## Topic 13 — Documentation and deliverables
