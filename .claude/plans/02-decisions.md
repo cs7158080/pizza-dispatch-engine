@@ -27,11 +27,11 @@ status markers, precisely so that this table cannot be contradicted.
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
-| 11 — Docker Compose | 11.1–11.7, 11.9, 11.11 | 11.8, 11.10 |
+| 11 — Docker Compose | 11.1–11.9, 11.11 | 11.10 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **86** | **24** |
+| **Total** | **87** | **23** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2644,9 +2644,10 @@ and Part 4 of `03-roadmap.md`).
   carries `required: false`, which needs Compose 2.24 — and 11.10 has not fixed a version floor.
   Interpolation buys the same override surface with no version requirement at all.
 
-  *`.env.example` carries ten active `NAME=value` lines* — 10.5's five vendor variables, 10.4's four
-  tunables, and `PIZZA_API_BASE_URL` — each with the value Compose defaults to, so the file is a
-  complete and valid environment. `PIZZA_DATABASE_URL` and `PIZZA_BROKER_URL` appear in **one prose
+  *`.env.example` carries eleven active `NAME=value` lines* — 10.5's five vendor variables, 10.4's
+  four tunables, `PIZZA_API_BASE_URL`, and 11.8's `API_HOST_PORT` — each with the value Compose
+  defaults to, so the file is a complete and valid environment. **This read "ten" until 11.8 closed**,
+  which is the Compose-only variable 10.1 pre-authorised this item to gain. `PIZZA_DATABASE_URL` and `PIZZA_BROKER_URL` appear in **one prose
   comment** naming both and stating that Compose assembles them from the values above, so setting
   them in the file has no effect.
   *Rejected — writing those two as commented `# NAME=value` lines.* In an env file that form reads
@@ -2983,6 +2984,56 @@ and Part 4 of `03-roadmap.md`).
   *This is what keeps A8 valid:* 11.6 accepted conditional determinism on the promise of a
   clean start. Without persistence, that promise costs one documented command.
   *Source:* R15, `CLAUDE.md` §5, §6. *Answers:* Q17.
+
+- **11.8 Published host ports.** `[decided]`
+  *Decision:* **one published port, the API's, and it is variable on the host side:**
+  `${API_HOST_PORT:-8000}:8000`. Nothing else is published.
+
+  *The question this item was written for no longer exists, and saying so is half the record.* The
+  inventory ties this to "host-side CLI use (9.3)"; 9.3 then put the CLI in a container and recorded
+  that 11.8 is *"now free of any CLI dependency"*, 12.3 keeps the suite inside one too, and 1.2
+  removes the last two demand-side reasons by name — `/docs` is out of the demo path because *"the
+  demo stays one tool"*, and the broker-down path, which *"needs psql or a published port"*, goes to
+  13.4's documented trade-offs *"where it costs nothing and reopens no item"*. **Every named consumer
+  therefore works with no port published at all.** What follows is decided on top of that, not
+  against it.
+
+  *Why the API's port is published anyway.* 2.3 chose FastAPI partly on a claim it made in writing —
+  the generated OpenAPI document is *"a free, always-accurate statement of the contract in topic 6,
+  which a reviewer can read without reading code"*. Unpublished, that claim is not true of the
+  delivered system. 1.2 excluded `/docs` from the **demo path**, which is a different statement from
+  excluding it from existence: the path stays one tool, and the door exists for a reviewer who wants
+  more than the menu. It costs one line and carries no credential.
+
+  *Why the host side is a variable and the container side is not.* 10.4 fixed `8000` inside the
+  image as a constant, and 10.1 pre-authorised *"one Compose-only variable if 11.8 chooses a variable
+  host port — which our code never reads"*. The asymmetry has a rule under it: **a value becomes
+  configuration when something outside our control can force it to differ.** Inside the network
+  nothing can — each container has its own namespace, so `8000` collides with nothing, and the value
+  is transcribed in three of our own places (the API's command, 10.1's `http://api:8000`, and 11.2's
+  healthcheck) where a variable would be one fact in three copies. On the host something can: 8000 is
+  heavily used on development machines, and a reviewer who has it must otherwise edit the file we
+  handed them.
+  *`API_HOST_PORT` carries no `PIZZA_` prefix*, by 10.1's own naming rule — the prefix marks what our
+  code reads, and nothing reads this. It therefore also sits outside 10.3's drift test, exactly as the
+  five vendor variables do. *This item amends 10.3*, whose count of active `.env.example` lines moves
+  from ten to eleven.
+
+  *`5432` is not published, and this is the check 10.5 asked for by name.* 10.5 rests its "these are
+  not secrets" assertion on two legs — a disposable environment (A19) **and** no published port
+  carrying the credentials — and names publishing `5432` as what breaks the second. Nothing needs it:
+  12.3 gives the suite no database client at all, and 1.2 already moved the one path that wanted it
+  into 13.4. **10.5 is therefore not reopened, and both of its legs stand.**
+  *Rejected — `5672`.* Nothing on the host speaks AMQP.
+  *Rejected — `15672`, the management UI.* The tempting one, since it would show the wait queue
+  holding a message. 11.1's `attach: false` is what makes it redundant: 1.2 has the reviewer watch
+  terminal 1 at steps 6 and 8 for the worker's "no driver" warning and its dispatch line, so the retry
+  cycle is already demonstrated by the mechanism 1.2 chose. It would also force the management variant
+  of the vendor image, and under 1.1's ceiling test no named DoD row fails without it.
+  *Rejected — a fixed `8000:8000`* — it makes the one collision we cannot prevent unfixable without
+  editing a delivered file; *an ephemeral host port* — the README could then name no URL.
+  *Source:* R14, R19. *Constrained by:* 1.1, 1.2, 2.3, 9.3, 10.1, 10.3, 10.4, 10.5, 11.1, 12.3.
+  *Amends:* 10.3's line count. *Confirms:* 10.5 stays closed. *Realised in:* U9.
 
 - **11.9 Image build strategy.** `[decided]`
   *Decision:* **one `Dockerfile`, base `python:3.12-slim`, pinned by tag; two stages; two installs;
