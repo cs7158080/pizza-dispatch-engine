@@ -561,6 +561,11 @@ what makes each of steps 5 to 8 type-check on its own even though nothing runs u
   only**, deliberately: 7.6 makes a status update succeed without the broker, so a `503` for an
   unreachable broker would be false. A bad environment exits `1` before the port opens, so a
   misconfigured api fails its healthcheck rather than serving errors.
+  *Handed here unverified, measured while closing step 9:* the probe carries **no connect
+  timeout**, and against a database that refuses the connection it answered `False` after 130
+  seconds on Windows — the delay is libpq's, and a refusing database is exactly the container
+  that has not finished starting. U9 is the first unit that sees this on Linux, and it writes
+  `interval` and `timeout` beside it. The row in `docs/ai-log.md` carries the measurements.
 - **U10 (12.3, 12.1):** the six routes and their bodies are the whole surface the suite drives.
   Everything this plan marks "read from the diff" becomes observable here — 6.5's nesting, 6.9's
   lock through F14 if 12.1 selects it, and 7.6's `200` only if 12.3's reopen condition is ever met,
