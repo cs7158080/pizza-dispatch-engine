@@ -2783,12 +2783,16 @@ and Part 4 of `03-roadmap.md`).
   four lines into services that already differ in `command`, `environment`, `depends_on`, `restart`
   and `profiles`, compressing the smallest part of each at the cost of one indirection before a
   reader knows what a service actually is.
-  *Rejected — `attach: false` on `postgres` and `rabbitmq`*, which 9.3 left open here. It would keep
-  RabbitMQ's startup banner out of the stream 11.3 prints its PASS/FAIL summary into. Declined on
-  three counts: it hides the infrastructure logs in exactly the case where they are the diagnosis, a
-  stack that does not come up; it asserts a Compose version floor before 11.10 has set one, where
-  9.3's `profiles` assumption at least names 11.10 as its confirmation; and 11.3 already owns making
-  that summary unmissable, which is a property of the summary rather than of the log stream.
+  **`attach: false` on `postgres` and `rabbitmq`**, which 9.3 left open here and **1.2 had already
+  fixed** — its *Constrains* line reads *"`attach: false` on postgres and rabbitmq, so terminal 1
+  carries api, worker and tests only"*. The demo path is thirteen steps across two terminals, and at
+  steps 6 and 8 the reviewer is told to watch terminal 1 for the worker's "no driver" warning and its
+  dispatch line. Those are the worker's own lines, and vendor startup noise is what buries them.
+  *What it does not cost, because the objection is the obvious one:* the logs are still collected —
+  `attach: false` removes a service from the `up` stream, not from `docker compose logs postgres`. A
+  stack that fails to come up is diagnosed with the same command either way.
+  *Assumption:* `attach:` requires a Compose version floor, as 9.3 assumed for `profiles`; **11.10
+  confirms it**.
   *Rejected — a declared network.* Compose's default network already resolves a service by its name,
   which is what 10.1's three URLs assume. Declaring one adds lines and changes no behaviour.
 
@@ -2797,8 +2801,8 @@ and Part 4 of `03-roadmap.md`).
   exec-form requirement 8.8 hands on — 11.9, so that one form is fixed in one place. The
   `environment:` blocks are none of these: they transcribe 10.1's table, which 10.3 already left to
   U9 by name.
-  *Source:* R14, R15. *Constrained by:* 2.1, 2.2, 3.7, 4.6, 9.3, 10.1, 10.3, 11.3, 11.4.
-  *Constrains:* 11.2, 11.9. *Realised in:* U9.
+  *Source:* R14, R15. *Constrained by:* 1.2, 2.1, 2.2, 3.7, 4.6, 9.3, 10.1, 10.3, 11.3, 11.4.
+  *Constrains:* 11.2, 11.9, 11.10. *Realised in:* U9.
 
 - **11.2 Readiness and ordering.** `[decided]`
   *Decision:* **Compose conditions alone. Nothing under `src/` waits for anything.** The inventory
