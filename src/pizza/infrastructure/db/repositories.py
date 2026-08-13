@@ -64,6 +64,16 @@ class SqlAlchemyOrderRepository(OrderRepository):
         row = self._session.get(OrderModel, order_id)
         return None if row is None else _to_order(row)
 
+    def get_for_update(self, order_id: UUID) -> Order | None:
+        """Lock the order and return it, holding the lock for the whole transaction.
+
+        The primary-key path get() takes, with the lock added, so the two cannot
+        drift in how they load a row. The lock argument also bypasses the identity
+        map, so the SELECT is issued even for a row this Session already holds.
+        """
+        row = self._session.get(OrderModel, order_id, with_for_update=True)
+        return None if row is None else _to_order(row)
+
     def save(self, order: Order) -> None:
         # Loaded earlier in this Session by get(), so this resolves from the
         # identity map; it would issue a SELECT otherwise. A row that is not there

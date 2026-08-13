@@ -19,7 +19,7 @@ status markers, precisely so that this table cannot be contradicted.
 |---|---|---|
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1–2.10 | — |
-| 3 — Architecture and layering | 3.1–3.8 | — |
+| 3 — Architecture and layering | 3.1–3.9 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.1–6.9 | — |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **90** | **20** |
+| **Total** | **91** | **20** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -89,8 +89,8 @@ and Part 4 of `03-roadmap.md`).
   |---|---|---|---|
   | 1 | 1 | `docker compose up` | stack starts, suite runs, PASS/FAIL summary (11.3) |
   | 2 | 2 | `docker compose run --rm cli` | the menu (9.3) |
-  | 3 | 2 | place an order | `RECEIVED`, `assignment_state: PENDING` |
-  | 4 | 2 | list orders, select by customer name | R11 without retyping a UUID (A14) |
+  | 3 | 2 | place an order | `201` and the new order's id (6.1); its status is read at step 4 |
+  | 4 | 2 | list orders, select by customer name | `RECEIVED`, `assignment_state: PENDING`; R11 without retyping a UUID (A14) |
   | 5 | 2 | advance to `PREPARING` | `200` |
   | 6 | 2 | advance to `BAKING` | publish (5.3); **T1:** worker warns "no driver", rejects to the wait queue (8.1, 8.2) |
   | 7 | 2 | register a driver | `AVAILABLE` (6.4) |
@@ -951,6 +951,9 @@ and Part 4 of `03-roadmap.md`).
   *Amended by 6.9 on 2026-08-11:* `OrderRepository` gains `get_for_update`, taking a row lock for the
   status-update path. It is a second method rather than a flag on `get`, so that the read paths above
   cannot acquire a lock by accident.
+  *Amended by 3.9 on 2026-08-13:* `UnitOfWork.commit()` declares `TransactionFailed`. It was the one
+  port method here that can fail from the outside and named no error, against this module's own rule
+  that a port error sits above the port that raises it.
   *Source:* `CLAUDE.md` §3 ("explicit typed boundaries"), §2 Phase 3. *Constrained by:* 2.4, 2.5,
   3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 6.9, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
   2.5's "a port of its own", 4.7's sample line. *Realised in:* U3.
@@ -1127,6 +1130,40 @@ and Part 4 of `03-roadmap.md`).
   §3's "every entry point uses the same core" is satisfied by the structure rather than by a
   choice made here.
   *Source:* `CLAUDE.md` §3, R20. *Constrained by:* 3.1, 3.3, 3.5.
+
+- **3.9 What `UnitOfWork.commit()` may raise.** `[decided]`
+  *Decision:* the port declares **`TransactionFailed`**, defined in `application/ports.py` above
+  `UnitOfWork` by the rule that module already states. `SqlAlchemyUnitOfWork.commit()` translates
+  `SQLAlchemyError` into it and nothing else. `AdvanceOrderStatus` catches it beside
+  `OutboxWriteFailed` at the outbox mark, and nowhere else.
+
+  *What it repairs.* `mark_published` sets `published_at` and lets the `UPDATE` leave with the
+  transaction, because 2.5 turned autoflush off. So `except OutboxWriteFailed` guards the `SELECT`
+  and the missing row and never the write the method is named for, and a reader takes that write
+  as guarded. With the type, the catch covers what it claims.
+
+  *The window is narrow, and it is not the argument.* The `SELECT` one line earlier proves the
+  connection live, so the fault has to land between two adjacent statements — the window already
+  accepted when a `flush()` inside `mark_published` was rejected on 2026-08-12. What decides this
+  item is that the catch names an error its own operation cannot raise, and that `publish` and
+  `mark_published` declare their failures while `commit()` did not.
+
+  *Where it stops — `__exit__` is not translated.* Its `rollback()` runs during unwinding, so an
+  error raised there would replace the exception already in flight and lose the cause; and no
+  caller would act on it differently. `commit()` is called deliberately and its result can be
+  acted on, which is what earns it a declared error and leaves `__exit__` without one.
+
+  *No behavioural change at the first commit.* A failure there means the write did not happen, and
+  6.2 admits no deliberate `5xx`, so it reaches the entry point's `Exception` handler and returns
+  6.3's body with `500` — the same outcome as an untyped error, without SQLAlchemy crossing a layer.
+
+  *Rejected:* **leaving `commit()` untyped** with a comment naming what the catch omits — zero
+  code, but it documents a misleading catch instead of removing it; **`except Exception` at the
+  mark** — `CLAUDE.md` §6, and the same argument already settled at U3's step 5; **`flush()` inside
+  `mark_published`** — rejected on 2026-08-12, and it answers one call site rather than the
+  contract.
+  *Source:* 3.4's and 3.5's silence, recorded at U5's step 7. *Constrained by:* 2.5, 3.1, 6.2, 7.5.
+  *Amends:* 3.4's port surface. *Realised in:* U7.
 
 
 ## Topic 4 — Data model
@@ -1442,7 +1479,7 @@ and Part 4 of `03-roadmap.md`).
   with self._uow as uow:
       uow.orders.add(order)                # add returns None
       uow.commit()
-  return order                             # its id was known before the transaction opened
+  return order.id                          # known before the transaction opened, so nothing is read back
   ```
 
   *Why not a sequential integer — the alternative at its real strength.* It is genuinely easier
@@ -1494,11 +1531,11 @@ and Part 4 of `03-roadmap.md`).
   in the same change. *Removes* the id generator from the list of ports 3.4 defines.
   *Left to 3.4:* whether signatures name `UUID` directly or a `NewType` per entity — a question
   about the typed boundary, which is 3.4's subject.
-  *Corrected by 6.1 on 2026-08-11:* the sample's last line was `return order.id`, and `POST /orders`
-  responds with the whole order, so `place_order` returns the entity. The line is amended in place
-  rather than annotated, because it is code a reader would copy. The identifier scheme this item
-  decides is unchanged — the id is still known before the transaction opens, which is what the line
-  was written to show.
+  *The sample's last line was changed twice and stands as written.* 6.1 amended it to `return order`
+  on 2026-08-11, when `POST /orders` answered with the whole order, and restored it on 2026-08-13
+  when that record reversed. It is amended in place rather than annotated, because it is code a
+  reader would copy. The identifier scheme this item decides was never in question either way — the
+  id is known before the transaction opens, which is what the line exists to show.
   *Source:* R1, R4, R11, R12. *Constrained by:* 2.5, 3.1, 3.5, 4.8, 7.5. *Constrains:* 3.4, 4.1,
   4.5, 4.6, 7.2.
   *Revisit if:* a test needs to predict an identifier, or an identifier acquires business meaning —
@@ -1788,16 +1825,16 @@ and Part 4 of `03-roadmap.md`).
 ## Topic 6 — API contract
 
 - **6.1 Request and response schemas.** `[decided]`
-  *Decision:* **three request schemas and four response schemas.** Every request model is declared
+  *Decision:* **three request schemas and five response schemas.** Every request model is declared
   `extra="forbid"` (2.3), and every violation returns `422` (4.2).
 
   | Endpoint | Request | Response |
   |---|---|---|
-  | `POST /orders` | `CreateOrderRequest` — `customer_name`, `address`, `items`; the bounds are 4.2's | `OrderResponse` |
+  | `POST /orders` | `CreateOrderRequest` — `customer_name`, `address`, `items`; the bounds are 4.2's | `Created` |
   | `PATCH /orders/{id}/status` | `UpdateStatusRequest` — `status` only | `OrderResponse` |
   | `GET /orders/{id}` | — | `OrderResponse` |
   | `GET /orders` | — | `list[OrderSummary]` |
-  | `POST /drivers` | `RegisterDriverRequest` — `name` only (6.4), 1 to 100 characters | `DriverResponse` |
+  | `POST /drivers` | `RegisterDriverRequest` — `name` only (6.4), 1 to 100 characters | `Created` |
   | `GET /health` | — | `{"status": "ok"}` |
 
   **`OrderResponse`** — nine keys: `id`, `customer_name`, `address`, `items`, `status`,
@@ -1806,19 +1843,31 @@ and Part 4 of `03-roadmap.md`).
   that a fact written in two places eventually disagrees with itself, applies to a JSON document as
   much as to this file.
   **`OrderSummary`** — 6.6's five fields, unchanged.
-  **`DriverResponse`** — `{id, name, status}`, and it **is** 6.5's nested object: one schema serves
-  both the registration response and the nesting. `drivers.created_at` stays in the entity as 5.4's
-  tie-breaker and never leaves the system — delete it from the response and no named DoD row fails
-  (1.1).
+  **`DriverResponse`** — `{id, name, status}`, and it **is** 6.5's nested object. It serves that
+  nesting alone; `drivers.created_at` stays in the entity as 5.4's tie-breaker and never leaves the
+  system — delete it from the response and no named DoD row fails (1.1).
+  **`Created`** — `{id}`, and it serves both creations.
 
-  *`POST /orders` returns the whole order, and this corrects 4.7.* That record's sample has the use
-  case `return order.id`; `place_order` returns the `Order`, and `register_driver` the `Driver`.
-  The reason is 1.2's step 3 — placing an order shows `RECEIVED` and `PENDING` — which under an
-  id-only response costs a second round trip for a fact the server has just written. 4.7's own
-  subject, the identifier scheme, is untouched.
-  *Rejected:* **`201` with `{"id": …}` and a `Location` header** — the orthodox REST shape, and it
-  buys conformance while charging that round trip on a path that is itself a graded row. Status
-  codes are 6.2's subject, not this item's.
+  *`POST` answers with the identifier alone. **Reversed on 2026-08-13**; this record previously
+  returned the whole order and amended 4.7's sample to match.* The original argument was that an
+  id-only response costs a second round trip for a fact the server has just written. That argument
+  is nearly empty at a creation: **a newly created record holds no fact the client cannot predict** —
+  every new order is `RECEIVED` with `PENDING` and no driver (4.9), every new driver is `AVAILABLE`
+  (6.4), and the remaining fields echo what the client just sent. Only the identifier and
+  `created_at` are the server's, and nothing reads the second at that moment. 1.2's step 4 lists the
+  orders immediately afterwards, so the status is shown through `GET /orders` either way.
+  *What the reversal costs, stated:* one more response schema, and `DriverResponse` stops carrying a
+  body of its own. What it buys is a creation response that carries no field the caller sent us, and
+  a client that never has to be told which fields of its own request were kept.
+  *What it does not change — the contrast is the whole reason the two differ:* `PATCH` keeps the
+  full representation. Its body carries `assignment_state`, which 4.9 lets survive as `FAILED` into
+  `DELIVERED`, so the client learns something it did not send and cannot compute. 6.2 argues that at
+  length when it rejects `204`. That argument is real there and absent here.
+  *Rejected:* **a `Location` header beside the id** — the orthodox completion of this shape, and no
+  consumer reads it: 3.6's CLI branches on the status code and 12.3's suite composes its own URLs.
+  Under 1.1's ceiling test nothing degrades without it. **A full representation on `POST`** — the
+  form this record shipped until the reversal; it is defensible and it was carried by one argument
+  only, that a single `OrderResponse` serves three endpoints instead of two.
 
   *Two smaller calls.* **Timestamps are not pinned to a spelling.** The contract is ISO 8601 with an
   explicit UTC offset — Pydantic v2's default, no custom serializer — and 12.3's assertions are on
@@ -1833,7 +1882,7 @@ and Part 4 of `03-roadmap.md`).
   *Recorded as an assumption:* the brief specifies no response body for `POST /orders` or
   `PATCH /orders/{id}/status` — **A27**.
   *Source:* R1–R4, R11, R18. *Constrained by:* 4.1, 4.2, 4.3, 4.7, 6.4, 6.5, 6.6, 7.6.
-  *Corrects:* 4.7's sample line. *Constrains:* 6.2, 6.3. *Realised in:* U7.
+  *Constrains:* 6.2, 6.3. *Realised in:* U7.
 
 - **6.2 Status codes.** `[decided]`
   *Decision:* **eight rows, and no deliberate `5xx` anywhere in the system.**
@@ -1849,10 +1898,11 @@ and Part 4 of `03-roadmap.md`).
   | Validation failure — unknown field, bound exceeded, unrecognised status value, malformed UUID in the path | `422` | Pydantic, before the core sees anything (4.2, 5.2) |
   | `GET /health` cannot reach the database | `503` | the router (6.6) |
 
-  *`201`, and still no `Location` header.* 6.1 rejected the orthodox creation shape on the round
-  trip its header costs, not on the code. The code costs a `status_code=201` argument and is simply
-  the accurate one. *Rejected:* a uniform `200` for every success — the only consumer it would
-  simplify is the CLI, which does not branch on a success code.
+  *`201`, and still no `Location` header.* Both creations answer with `{"id": …}` since 6.1's
+  reversal, which is most of the orthodox creation shape; the header is the part that stays out,
+  because no consumer reads it. The code costs a `status_code=201` argument and is simply the
+  accurate one. *Rejected:* a uniform `200` for every success — the only consumer it would simplify
+  is the CLI, which does not branch on a success code.
 
   *`PATCH` returns `200` with a body, and `204` is rejected on one fact.* `204` forbids a body, so
   the code and the body are a single question. The usual argument for a body — a saved round trip —
@@ -3802,7 +3852,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A24** † | "Microservice" means separate processes and containers, not separate codebases — the API and the worker are two entrypoints into one package over one database | 3.3 |
 | **A25** † | The local credentials are non-secret committed defaults for a disposable environment; a real deployment supplies its own | 10.5 |
 | **A26** | Every configuration value comes from the environment, and `docker-compose.yml` is the only place a default is written | 10.1, 10.2 |
-| **A27** | `POST /orders` and `PATCH /orders/{id}/status` return the full order representation; the brief specifies no response body for either | 6.1 |
+| **A27** | `POST /orders` and `POST /drivers` answer with the identifier alone, `PATCH /orders/{id}/status` with the full order representation; the brief specifies no response body for any of them | 6.1 |
 | **A28** | A dispatch message that cannot be decoded is dropped; the order stays `PENDING` and the log is the only record | 8.4 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".

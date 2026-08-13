@@ -38,7 +38,7 @@ is fixed by 14.4).
 | **U4** Core unit tests | Unit tests for the rules identified as infrastructure-free | 5.7, 12.6, 12.7 | U3 | — |
 | **U5** Persistence | Schema creation (4.6), repository implementations, the `outbox` table and its insert/mark-published operations (7.5) with the event serialization it stores (7.3), integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 7.3, 7.5, 8.9 | U2, U3 | U6, U7, U8 |
 | **U6** Broker adapter | Topology declaration, publisher implementation, connection lifecycle | 2.1, 2.7, 7.1, 7.3–7.7 | U2, U3, U5 *(7.3's module only)* | U7, U8 |
-| **U7** API service | Routes, edge validation, error format, status-update endpoint including the publish trigger, wiring of core + repositories + publisher | 2.3, 2.4, 6, 7.5, 7.6, 8.7 | U3, U5, U6 | U9, U12 |
+| **U7** API service | Routes, edge validation, error format, status-update endpoint including the publish trigger, wiring of core + repositories + publisher | 2.3, 2.4, 3.9, 6, 7.5, 7.6, 8.7 | U3, U5, U6 | U9, U12 |
 | **U8** Dispatch worker | Consumer loop, ack/nack policy, retry and dead-letter handling, poison-message handling, dispatch logging, startup/shutdown | 8 | U3, U5, U6 | U9 |
 | **U9** Compose environment | Dockerfiles, compose services, healthchecks and readiness ordering, volumes, ports, restart policies | 3.7, 11.1, 11.2, 11.7–11.11 | U7, U8 | U10, U11 |
 | **U10** Integration test suite | The 3–4 risk-ranked scenarios, condition-based waiting, data isolation | 12.1–12.5, 12.8 | U9 | U11 |
