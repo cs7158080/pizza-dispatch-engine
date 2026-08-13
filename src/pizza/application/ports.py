@@ -26,6 +26,14 @@ class OrderRepository(Protocol):
 
     def get(self, order_id: UUID) -> Order | None: ...
 
+    def get_for_update(self, order_id: UUID) -> Order | None:
+        """Lock the order and return it, holding the lock for the whole transaction.
+
+        Write paths only. A read path taking this would block writers for the sake
+        of a value it does not change.
+        """
+        ...
+
     def save(self, order: Order) -> None: ...
 
     def list_all(self) -> list[Order]:

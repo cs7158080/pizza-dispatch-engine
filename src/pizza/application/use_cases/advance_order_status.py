@@ -44,7 +44,7 @@ class AdvanceOrderStatus:
         event: OrderReadyEvent | None = None
 
         with self._uow as uow:
-            order = uow.orders.get(order_id)
+            order = uow.orders.get_for_update(order_id)
             if order is None:
                 raise OrderNotFound(order_id)
 
