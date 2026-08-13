@@ -1099,9 +1099,9 @@ and Part 4 of `03-roadmap.md`).
   *The build steps this item owns*, per the inventory's "shapes the build steps": dependency
   layer before source so the cache survives a source edit; a `.dockerignore`; a pinned `slim`
   base; a non-root `USER`; and **exec-form `CMD`**, which is not cosmetic here — shell form puts
-  a shell at PID 1 and the signal never reaches the process, so whatever 8.8 decides about
-  shutting down without losing an in-flight message would be unimplementable. This item supplies
-  the precondition; 8.8 still owns the behaviour.
+  a shell at PID 1 and the signal never reaches the process, so `uvicorn` cannot finish its
+  in-flight HTTP requests and every container is force-killed at the end of the grace period on
+  each stop. 8.8 records the same requirement from the worker's side.
 
   *What FW2 costs, closing 7.5's question through 3.3:* the relay is `entrypoints/relay/main.py`
   plus a compose entry running the `runtime` image with a different command. **No new image, no
@@ -2845,8 +2845,9 @@ and Part 4 of `03-roadmap.md`).
   *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines).
 
 - **8.8 Startup and shutdown behaviour.** `[decided]`
-  *Decision:* **the worker retries nothing itself.** It exits on a broker it cannot reach or has
-  lost, and the restart policy brings it back; `SIGTERM` stops it after the message in hand.
+  *Decision:* **the worker retries nothing itself, and handles no signal.** It exits on a broker it
+  cannot reach or has lost, and the restart policy brings it back; on `SIGTERM` it dies where it
+  stands, and the message in hand is redelivered.
 
   *The database needs nothing here, and the absence is the decision rather than an omission.*
   Three items already cover its three cases: 4.6 starts the worker only after the one-shot schema
@@ -2876,32 +2877,30 @@ and Part 4 of `03-roadmap.md`).
   cannot exit, and the worker is under no such constraint. 7.7 already records one asymmetry
   between the two, over heartbeats.
 
-  *Shutdown.* `entrypoints/worker/main.py` registers a `SIGTERM` handler — the composition root,
-  because a signal is a property of the process and not of the consumer or the broker adapter:
+  *Shutdown — `entrypoints/worker/main.py` registers no signal handler.* `SIGTERM` takes Python's
+  default disposition and the process dies where it stands. A message being processed at that
+  moment was never acked, so its transaction rolls back and 7.4 redelivers it to the next process;
+  8.1 acks only after the commit and 5.5 makes a repeated assignment a no-op, so the cost is one
+  duplicated attempt and no changed outcome.
 
-  ```python
-  connection.add_callback_threadsafe(channel.stop_consuming)
-  ```
+  *This answers the question the item was asked rather than declining it.* "How does it shut down
+  without losing an in-flight message" has two possible answers — hold the message until it is
+  finished, or make losing it harmless. The second is already built, by three items that exist for
+  their own reasons, and it covers `SIGKILL` and a pulled plug as well, which no handler ever could.
 
-  The handler **requests** rather than acts, which is what produces the wanted order without
-  logic of ours: a signal arriving mid-message enqueues the request, the transaction finishes,
-  the ack goes out, and `pika` runs the request when the callback returns. `start_consuming()`
-  then returns for the first time in the process's life, the connection closes, and the process
-  exits **`0`** — the value that separates "leave me" from "restart me".
-  *Why `add_callback_threadsafe` and not `stop_consuming()` directly:* Python runs a signal
-  handler wherever the process happens to be, including inside `pika`, and re-entering the library
-  there breaks non-deterministically. This call only enqueues and wakes the loop, which then runs
-  it at a point it chose.
-  *`SIGTERM` only.* Every stop path in the deployed environment sends it — `down`, `stop`,
-  `restart`, and `Ctrl+C` on a foreground `up`. `SIGKILL` admits no handler in any language, and
-  there redelivery is the whole answer. `SIGINT` reaches only a direct host run, which is not how
-  this system is run; adding it is one line.
-  *Stated so U8 does not improvise:* when the connection is already closed — the broker died and
-  the process is on its way out — the handler does nothing.
-  *Rejected:* **no handler at all.** Correctness does not require one: 8.1 acks after the commit,
-  5.5 is idempotent, and 7.4 redelivers, so a killed worker loses nothing. It is declined because
-  the item asks how the worker shuts down without losing an in-flight message, and answering at
-  the process level rather than delegating to redelivery costs six lines.
+  *Reversed on 2026-08-13; this item previously registered a handler.* It called
+  `connection.add_callback_threadsafe(channel.stop_consuming)`, so that a signal arriving mid-message
+  enqueued a request rather than acting on it, and the process exited `0`. What that bought was the
+  message in hand finishing immediately instead of being redelivered — and 11.7's disposable
+  environment discards, on the same `down`, the database the work was written to, so the difference
+  is not observable. What it cost was six lines carrying a `pika` re-entrancy hazard, an edge case
+  for an already-closed connection that had to be written out so U8 would not improvise, and a
+  second shutdown path to reason about. `CLAUDE.md` §3 settles that trade against it.
+
+  *One consequence, named because 11.11 rests on it:* the worker now has **no exit path that
+  returns `0`**. `start_consuming()` returned only when `stop_consuming` was called, and that call
+  was the handler. Every exit is non-zero — a broker failure through our own code, and a signal
+  through termination, which Docker reports as `143` under the 128-plus-signal convention.
 
   *One `INFO` line once `basic_consume` has succeeded*, so `docker compose up` shows the worker
   reaching readiness. Its shape and level are 8.7's, with every other line in the worker.
@@ -2910,11 +2909,11 @@ and Part 4 of `03-roadmap.md`).
 
   | To | What | Kind |
   |---|---|---|
-  | 11.11 | The worker's resilience **is** the restart policy — it must restart the worker on a non-zero exit. Nothing in the code retries | **requirement** |
-  | 11.9 | The image's `CMD` must be **exec form**. Under shell form `sh` receives the `SIGTERM` and does not forward it, so the handler above never runs and the failure is silent | **requirement** |
+  | 11.11 | The worker's resilience **is** the restart policy — it must restart the worker on a non-zero exit. Nothing in the code retries, and no exit is `0` | **requirement** |
+  | 11.9 | The image's `CMD` must be **exec form**. Under shell form `sh` receives the `SIGTERM` and does not forward it, so no process in the container ever sees it: `uvicorn` cannot finish its in-flight HTTP requests, and every service is force-killed at the end of the grace period on each stop | **requirement** |
   | 11.2 | The worker needs no `depends_on` on the broker for correctness. Without one it will exit and restart a handful of times on each `up` while RabbitMQ boots — legibility, and 11.2's to weigh | note |
   | 11.2 | The worker offers **no healthcheck** and no endpoint to probe; it speaks no HTTP, and 6.6's probe is the API's. A worker healthcheck would need a mechanism invented for it | note |
-  | 11.2 / 11.11 | `stop_grace_period` is Compose's. 8.8 fixes only that the worker stops after the message in hand, which takes milliseconds | note |
+  | 11.2 / 11.11 | `stop_grace_period` is Compose's. 8.8 fixes only that the worker's exit is immediate — it holds nothing open and finishes nothing | note |
 
   *Source:* R14, R10. *Constrained by:* 4.6, 5.5, 7.4, 7.7, 8.1, 8.4, 8.5.
   *Narrows:* 7.7. *Constrains:* 11.2, 11.9, 11.11. *Realised in:* U8.
