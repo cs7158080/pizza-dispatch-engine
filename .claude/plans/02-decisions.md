@@ -27,11 +27,11 @@ status markers, precisely so that this table cannot be contradicted.
 | 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
-| 11 — Docker Compose | 11.1–11.7 | 11.8–11.11 |
+| 11 — Docker Compose | 11.1–11.7, 11.9 | 11.8, 11.10, 11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **84** | **26** |
+| **Total** | **85** | **25** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2979,6 +2979,116 @@ and Part 4 of `03-roadmap.md`).
   *This is what keeps A8 valid:* 11.6 accepted conditional determinism on the promise of a
   clean start. Without persistence, that promise costs one documented command.
   *Source:* R15, `CLAUDE.md` §5, §6. *Answers:* Q17.
+
+- **11.9 Image build strategy.** `[decided]`
+  *Decision:* **one `Dockerfile`, base `python:3.12-slim`, pinned by tag; two stages; two installs;
+  and no build step before `up`.** 3.7 fixed the shape and 2.9 handed over the rest in one line —
+  *"the base image is a `python:3.12` family, and layer ordering is 11.9's"*.
+
+  ```dockerfile
+  FROM python:3.12-slim AS runtime
+
+  ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+  RUN adduser --system --group app && mkdir -p /app && chown app:app /app
+  WORKDIR /app
+
+  # Dependencies before source: editing code must not reinstall them.
+  COPY requirements.txt .
+  RUN pip install --no-cache-dir -r requirements.txt
+
+  # The package itself; its dependencies are already installed and pinned above.
+  COPY pyproject.toml .
+  COPY src/ ./src/
+  RUN pip install --no-cache-dir --no-deps .
+
+  USER app
+  CMD ["uvicorn", "pizza.entrypoints.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+  FROM runtime AS test
+
+  USER root
+  COPY requirements-dev.txt .
+  RUN pip install --no-cache-dir -r requirements-dev.txt
+  COPY --chown=app:app tests/ ./tests/
+  USER app
+  ```
+
+  **The file carries the two purpose comments above and nothing else.** `CLAUDE.md` §6 rejects item
+  numbers in source; the mapping from each line to the record that fixed it lives here.
+
+  *Two things 2.9's four-line sketch omits, and without either the build does not do what it says.*
+  `pip install --no-deps .` builds our package and therefore needs `pyproject.toml` in the context,
+  which that sketch copies only `src/` for. And **the non-root switch has one correct position**:
+  after both installs, because `pip` writes into root-owned `site-packages`. The `test` stage
+  inherits `USER app` from `runtime` and must return to root to install the dev group — a build-time
+  state that ends before the stage does, so the test container runs non-root like every other.
+  *Rejected — installing the dev group before dropping the user in `runtime`:* it would put `pytest`,
+  `ruff` and `mypy` in the image the API runs, which is the one thing 3.7 split the stages to
+  prevent. *Rejected — `pip install --user`:* `app` is a system account with no home, and it would
+  split the install across two locations.
+
+  *Why `/app` is owned by `app`, folded into the `adduser` layer rather than given a `chown` of its
+  own.* `pytest` writes its cache into the rootdir, which is `/app` itself and not the `tests/`
+  directory — so `COPY --chown` on the tests does not reach it, and a root-owned `/app` costs a
+  warning in the stream 11.3 wants clean. **Stated at its real size: a warning, not a failure.**
+  Folding `mkdir` and `chown` into the layer that already exists costs no layer at all, and the
+  ownership weakens nothing, because 3.3's src-layout means the running code is the installed
+  distribution in `site-packages` — `/app/src` is a copy nothing imports once the build is done.
+
+  *`PYTHONUNBUFFERED=1` is load-bearing, not hygiene.* Python block-buffers stdout when it is not a
+  terminal, so without it `docker compose up` shows nothing until a buffer fills — which would land
+  on 11.3's PASS/FAIL summary and on 8.6's dispatch line, the two outputs the reviewer is watching
+  for.
+
+  *The base, and the one hole left open deliberately.* `slim` is 3.7's and the 3.12 family is 2.9's;
+  **Alpine is unavailable rather than declined** — 2.5 and 2.10 both record that `psycopg[binary]`
+  ships no musl wheel, so an Alpine base breaks the approved list. The tag is **not** pinned to a
+  digest: 2.9's two generated requirements files already lock everything we chose, and what a
+  floating tag still brings is OS security patches. A digest would trade those for a reproducibility
+  nothing here consumes, in an environment `docker compose down` destroys (A19). *This is a real gap
+  and it is chosen, not missed:* a base rebuilt months later is not byte-identical to the one this
+  was developed against.
+  *Rejected — a third "builder" stage* installing into a separate prefix and copying only the result
+  into a clean final image. Its purpose is to leave a compiler toolchain behind, and **there is never
+  one to leave**: `psycopg[binary]` was chosen precisely so that nothing compiles. A third stage with
+  no output.
+
+  *`.dockerignore`, as a deny list:* `.git`, `.venv`, `__pycache__/`, `*.pyc`, `.mypy_cache/`,
+  `.ruff_cache/`, `.pytest_cache/`, `.env`, `.claude/`, `docs/`. **`.env` is the one that matters
+  beyond build speed** — 10.3 has it feed Compose interpolation and reach no container ever, and a
+  copy baked into the image would contradict that silently.
+
+  **Exec form, in both places — and the second is where the exposure actually is.** 8.8 requires the
+  image's `CMD` to be exec form. 11.1 then gave every service its own `command:`, which **overrides
+  that `CMD` entirely**, so the worker never runs the command 8.8's requirement protects. Both are
+  therefore fixed here as list form, and the requirement stands on three legs rather than one:
+  `uvicorn` needs the signal to finish in-flight HTTP requests; under shell form every service is
+  force-killed at the end of the grace period on every `down`; and 8.8's shutdown handler needs it.
+  **It survives the loss of the third** — recorded because 8.8 is under a reopen request.
+
+  | Service | `command` |
+  |---|---|
+  | `api` | `["uvicorn", "pizza.entrypoints.api.main:app", "--host", "0.0.0.0", "--port", "8000"]` |
+  | `worker` | `["python", "-m", "pizza.entrypoints.worker.main"]` |
+  | `schema` | `["python", "-m", "pizza.entrypoints.schema.main"]` |
+  | `cli` | `["python", "-m", "pizza.entrypoints.cli.main"]` |
+  | `tests` | **not fixed here** — 12.9 is open and U11's; this item binds only the form |
+
+  The literal `8000` is 10.4's, which fixed the internal port as a constant in the image's command
+  rather than a variable. The `CMD` is the API because a bare `docker run` should do something
+  coherent; all five services override it.
+
+  **No build step before `up`.** 11.1's `build:` blocks mean `docker compose up` builds what is
+  missing, so the launch R15 is graded on stays one command. The README documents
+  `docker compose up --build` for a rebuild after a source change, which is a second command for a
+  case the reviewer's first run does not contain. First-run cost is answered by the three mechanisms
+  above — the dependency layer before the source, the `.dockerignore`, and a `slim` base — and not by
+  a fourth.
+  *Source:* R14, DoD "Docker Deployment". *Constrained by:* 2.5, 2.9, 2.10, 3.3, 3.7, 8.8, 10.4,
+  11.1, 11.3. *Extends:* 8.8's exec-form requirement to Compose's `command:`. *Leaves to U11:* the
+  `tests` command (12.9). *Realised in:* U9.
 
 
 ## Topic 12 — Testing
