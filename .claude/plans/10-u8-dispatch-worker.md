@@ -62,26 +62,28 @@ Each line names the item that owns it, so nothing here is silence.
 ## 3. Branch, commits, and the merge
 
 - **Branch:** `feat/u8-dispatch-worker`, cut from `main` at `028b7b9` (14.2).
-- **Commits:** one correction commit, one planning commit, then one commit per step (14.3, 14.4).
+- **Commits:** one planning commit, one correction commit, then one commit per step (14.3, 14.4).
   Six in total.
 - **Merge:** one pull request, squash-merged, its title ending in `(#16)` (14.2, 14.3). The branch
   is not deleted (14.2).
 
 | # | Type | Title |
 |---|---|---|
-| A | correction | `docs: correct where 8.4's decoding wrapper lands` |
 | B | planning | `docs: plan the dispatch worker` |
+| A | correction | `docs: correct where 8.4's decoding wrapper lands` |
 | 1 | step | `feat: report who took the order, for the line the dispatch logs` |
 | 2 | step | `feat: turn undecodable bytes into a value every caller must handle` |
 | 3 | step | `feat: one attempt per message, and what to do with the message after it` |
 | 4 | step | `feat: assemble the dispatch worker` |
 
-**A is not a plan step, and B is written against it.** 8.4's *Realised in* line reads *"U6 — the
-wrapper is part of 7.3's module and lands with the pair it joins"*. That was written in pull request
-#13, and **U6 merged in #11, two merges earlier** — so the record assigns work to a unit that had
-already shipped, and `deserialize_or_none` is on no branch. U6's own plan had already filed it under
-U8, in the row *"The `try`/`except` around `deserialize` … | 8.4 — open | U8"*, because 8.4 was still
-open when that document was written. A names U8 for the wrapper and states why, so the two documents
+**A is not a plan step, and it lands after B rather than before it.** The plan is written against
+the corrected reading, so U6's and U5's precedent would have put the correction first; here the plan
+was approved before the correction was, and the two texts say the same thing in either order.
+8.4's *Realised in* line read *"U6 — the wrapper is part of 7.3's module and lands with the pair it
+joins"*. That was written in pull request #13, and **U6 merged in #11, two merges earlier** — so the
+record assigned work to a unit that had already shipped, and `deserialize_or_none` is on no branch.
+U6's own plan had already filed it under U8, in the row *"The `try`/`except` around `deserialize` …
+| 8.4 — open | U8"*, because 8.4 was still open when that document was written. A names U8 for the wrapper and states why, so the two documents
 stop disagreeing; **nothing about the seam's shape changes** — the signature, the injection and the
 reason the consumer may not name `SerializationError` are 8.4's and are untouched. It rides on this
 branch rather than on a gate branch of its own, by the same ruling that placed U2's commit A, U3's
@@ -157,7 +159,8 @@ factual pointer rather than a judgement.
   one file away in `AdvanceOrderStatus`. It was declined so that all eight of 8.7's lines sit in one
   file with their levels, which is what a reviewer checks that table against; and because the
   application layer's existing lines are prose (`"publish failed for order %s"`) rather than
-  `event=` records, so a single `event=` line there would make one module carry two log styles.
+  `event=` records, so a single `event=` line there would put two log styles side by side in one
+  layer — the inconsistency between files that `CLAUDE.md` §6 names.
   **Named rather than dressed up:** this is the closer call of the two, and the reversal cost is one
   return type either way.
 - **R-d — the retry budget is read from the header mapping, by a module-level function taking a

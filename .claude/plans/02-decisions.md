@@ -2781,9 +2781,10 @@ and Part 4 of `03-roadmap.md`).
   *Left open deliberately:* every log line's shape here, truncation included, is **8.7**. The
   connection loop around the callback is **8.8**.
   *Source:* R10, DoD. *Constrained by:* 3.1, 7.3, 7.4, 7.7, 8.1, 8.2, 8.3, 8.5.
-  *Realised in:* U6 — the wrapper is part of 7.3's module and lands with the pair it joins, which
-  is where its neighbour `deserialize` also waits for U8's consumer. U8 realises everything else
-  in this record.
+  *Realised in:* U8. *Corrected on 2026-08-14:* this line read U6, which had already merged in
+  pull request #11 when this record closed in #13 — so the wrapper was assigned to a unit that had
+  shipped, and it exists on no branch. It still sits beside `deserialize` in 7.3's module, for the
+  reason this record gives; only the unit that writes it changes.
 
 - **8.5 Consumer concurrency.** `[decided]`
   *Decision:* **one worker replica in compose, prefetch 1.** This is a deployment choice, not
