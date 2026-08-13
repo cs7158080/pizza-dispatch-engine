@@ -62,8 +62,9 @@ Each line names the item that owns it, so nothing here is silence.
 ## 3. Branch, commits, and the merge
 
 - **Branch:** `feat/u8-dispatch-worker`, cut from `main` at `028b7b9` (14.2).
-- **Commits:** one planning commit, two record commits, then one commit per step (14.3, 14.4).
-  Seven in total.
+- **Commits:** one planning commit, three record commits, then one commit per step (14.3, 14.4).
+  Eight in total. The record commits are listed where they landed rather than gathered at the top:
+  two of the three were found while implementing, and the order is part of what they record.
 - **Merge:** one pull request, squash-merged, its title ending in `(#16)` (14.2, 14.3). The branch
   is not deleted (14.2).
 
@@ -76,6 +77,7 @@ Each line names the item that owns it, so nothing here is silence.
 | 2 | step | `feat: turn undecodable bytes into a value every caller must handle` |
 | 3 | step | `feat: one attempt per message, and what to do with the message after it` |
 | 4 | step | `feat: assemble the dispatch worker` |
+| D | correction | `docs: stop 3.1 counting its composition roots` |
 
 **A is not a plan step, and it lands after B rather than before it.** The plan is written against
 the corrected reading, so U6's and U5's precedent would have put the correction first; here the plan
@@ -98,6 +100,12 @@ given that it imports no broker library. Both halves of that hold — the wrappe
 the placement survives on a different test, which 7.3 did not state. What was missing was the
 justification rather than the decision, so it lands there and not here: step 2 points at it and does
 not restate it.
+
+**D was found by step 4's own Definition of Done, which is what that condition is for.** It asked
+the diff to show the worker's root as the second module under `entrypoints/` importing
+`infrastructure/`. It is the third — 4.6's schema service is one as well — and 3.1's own two
+sentences carried the same count, unchanged since before that service existed. Both are now written
+without a number, and no code moves.
 
 ## 4. The Definition of Done that applies to every step
 
