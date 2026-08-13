@@ -28,10 +28,10 @@ status markers, precisely so that this table cannot be contradicted.
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
-| 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
+| 12 — Testing | 12.1, 12.2, 12.3, 12.9 | 12.4–12.8, 12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **90** | **20** |
+| **Total** | **91** | **19** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3571,6 +3571,54 @@ and Part 4 of `03-roadmap.md`).
   *Hands to 2.6:* one HTTP client, and nothing else; topic 12 adds nothing to 2.10's list.
   *Source:* `CLAUDE.md` §5. *Constrained by:* 6.5, 6.6, 11.6, 11.7. *Constrains:* 2.6, 12.1,
   12.2, 12.4, 12.5. *Feeds:* 13.4.
+
+- **12.9 Where results are surfaced.** `[decided]`
+  *Decision:* **console only, no report file** — and the `command` 11.9 left blank:
+
+  ```yaml
+  tests: command: ["pytest", "tests/integration", "-v", "-ra", "--durations=0", "--tb=short"]
+  ```
+
+  Exec form is 11.9's; the path is 12.7's and nothing is added to it. The PASS/FAIL summary
+  11.3 requires is a `pytest_terminal_summary` hook in `tests/integration/conftest.py`, which
+  writes `terminalreporter.write_sep("=", "PASS")` — or `"FAIL"` — keyed on pytest's exit
+  status. `PYTHONUNBUFFERED=1` (11.9) is what puts it in the stream on time.
+
+  | Flag | Why |
+  |---|---|
+  | `-v` | one line per test, by name. 12.4 budgets ~30 s, 12 s of it in one scenario; without it the reviewer watches silence, and the four scenarios 13.1 names are not visible as they run |
+  | `--durations=0` | every scenario's real time, which turns 12.4's per-scenario budget into something measured rather than asserted |
+  | `-ra` | a recap of everything that did not pass, landing immediately before the banner |
+  | `--tb=short` | the failing assertion and its values, without a full traceback in a shared stream |
+
+  *Why the banner is a hook and not a shell wrapper around the command.* 11.4 rests entirely on
+  pytest's exit status reaching `--exit-code-from tests`, and every shell form that prints a
+  banner is a place to lose it — `pytest … || echo FAIL` exits **zero**, so the CI gate would be
+  green forever and nothing would say so. The hook cannot break it: it prints beside the exit
+  status instead of between it and Compose. It also reads that status directly, so a run that
+  collected no tests at all (pytest's exit 5) prints `FAIL` rather than a green banner over an
+  empty run. *The one gap:* a usage error aborts before the hook, leaving no banner — the exit
+  is still non-zero and pytest's own error is the explanation.
+
+  *Why no report file.* `junit-xml` is built into pytest and needs no plugin, so 2.10's list is
+  not in question; what it lacks is a reader. It would hold less than what already survives the
+  run, and 12.3 declined the `outbox` on exactly this ground — a thing nothing in the system
+  reads. **What survives, until `down` or the next `up`:** the `tests` container exits but is not
+  removed (11.1, 11.5), so `docker compose logs tests` returns the whole run — named scenarios,
+  durations, tracebacks — with the api and worker lines that interleaved it in the live stream
+  stripped away. A shell into it is not available, because `exec` needs a running container;
+  `docker compose run --rm tests <command>` starts a fresh one from the same image against the
+  live stack, which is also how a single scenario is re-run by hand.
+  *Rejected — writing the file and bind-mounting a host directory for it:* a generated artifact
+  in the reviewer's clone, needing a `.gitignore` line, and written by 11.9's non-root `app` into
+  a directory owned by someone else — a failed write aborts pytest and colours a healthy stack
+  red in the one stream 11.3 wants clean.
+  *Rejected — writing it inside the container without a mount,* retrievable by
+  `docker compose cp`. The cost is genuinely one flag, and it is still declined: it duplicates,
+  in a format nobody here parses, a subset of what `docker compose logs tests` already gives.
+  *Source:* R15, `CLAUDE.md` §5. *Constrained by:* 11.1, 11.3, 11.4, 11.5, 11.9, 12.4, 12.7.
+  *Fills:* 11.9's `tests` row. *Feeds:* 13.4 — the absence of `junit-xml` and the flag that adds
+  it, and the three commands above. *Realised in:* U11.
 
 
 ## Topic 13 — Documentation and deliverables
