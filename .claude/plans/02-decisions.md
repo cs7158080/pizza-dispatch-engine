@@ -3105,9 +3105,20 @@ and Part 4 of `03-roadmap.md`).
 
   *This is what 8.8 handed here as a requirement:* the worker's resilience **is** this policy, since
   nothing in its code retries a broker it cannot reach.
-  *Why `on-failure` and not `always`:* 8.8 gave the exit code a meaning — `0` *"separates 'leave me'
-  from 'restart me'"*. `on-failure` is the only value that honours it; `always` would restart a
-  successful exit too and erase a distinction another record built on purpose.
+  *Why `on-failure` and not `always` — and the honest answer is narrower than the one first written
+  here.* This record originally argued that 8.8 gave the exit code a meaning, `0` separating "leave
+  me" from "restart me". **8.8 is under a reopen that removes the `SIGTERM` handler**, and that
+  meaning goes with it: `start_consuming()` returns only when `stop_consuming` is called, which was
+  the handler's whole work. The worker is then left with two exits — a non-zero code on a broker it
+  cannot reach, and `143` on `SIGTERM` — and exit `0` becomes unreachable, so the distinction the
+  argument honoured stops existing.
+  *What actually separates the two values, at its real size:* **in every path this system has, almost
+  nothing.** Docker applies no restart policy to a container stopped deliberately — `down`, `stop`,
+  or `Ctrl-C` on a foreground `up` — so the `143` never triggers a restart under either value. One
+  narrow difference survives, and it is real here: `always` revives a manually stopped container when
+  the Docker daemon restarts, and 13.4 documents a manual `docker compose stop` for the broker-down
+  path. Beyond that the choice is what the word states — `on-failure` names the condition that
+  warrants a restart, which is also the rule the three one-shots below are the exception to.
   *Why uncapped:* 11.2 already prevents the startup crash-loop, since the worker does not start until
   the broker is healthy. What remains is a broker that dies later, and a cap would abandon one that
   comes back after the last attempt. Docker's own increasing delay between attempts is what bounds
