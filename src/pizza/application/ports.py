@@ -86,6 +86,10 @@ class EventPublisher(Protocol):
         ...
 
 
+class TransactionFailed(Exception):
+    """The transaction could not be committed."""
+
+
 class UnitOfWork(Protocol):
     """One transaction, holding the repositories bound to it.
 
@@ -101,4 +105,6 @@ class UnitOfWork(Protocol):
 
     def __exit__(self, *exc: object) -> None: ...
 
-    def commit(self) -> None: ...
+    def commit(self) -> None:
+        """Raises TransactionFailed."""
+        ...

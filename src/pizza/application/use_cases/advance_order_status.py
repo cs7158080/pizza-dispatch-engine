@@ -14,6 +14,7 @@ from pizza.application.ports import (
     EventPublisher,
     OutboxWriteFailed,
     PublishFailed,
+    TransactionFailed,
     UnitOfWork,
 )
 from pizza.application.queries import OrderDetail
@@ -85,7 +86,8 @@ class AdvanceOrderStatus:
             with self._uow as uow:
                 uow.outbox.mark_published(event.event_id, self._clock.now())
                 uow.commit()
-        except OutboxWriteFailed:
-            # Nothing reads unpublished rows, so this costs a row that
-            # understates what happened rather than any behaviour.
+        except (OutboxWriteFailed, TransactionFailed):
+            # The UPDATE leaves with the transaction, so the commit is where a
+            # database fault lands. Nothing reads unpublished rows, so this costs a
+            # row that understates what happened rather than any behaviour.
             logger.error("could not mark event %s published", event.event_id)
