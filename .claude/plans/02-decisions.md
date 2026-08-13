@@ -19,7 +19,7 @@ status markers, precisely so that this table cannot be contradicted.
 |---|---|---|
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1–2.10 | — |
-| 3 — Architecture and layering | 3.1–3.8 | — |
+| 3 — Architecture and layering | 3.1–3.9 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
 | 6 — API contract | 6.1–6.9 | — |
@@ -31,7 +31,7 @@ status markers, precisely so that this table cannot be contradicted.
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **90** | **20** |
+| **Total** | **91** | **20** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -951,6 +951,9 @@ and Part 4 of `03-roadmap.md`).
   *Amended by 6.9 on 2026-08-11:* `OrderRepository` gains `get_for_update`, taking a row lock for the
   status-update path. It is a second method rather than a flag on `get`, so that the read paths above
   cannot acquire a lock by accident.
+  *Amended by 3.9 on 2026-08-13:* `UnitOfWork.commit()` declares `TransactionFailed`. It was the one
+  port method here that can fail from the outside and named no error, against this module's own rule
+  that a port error sits above the port that raises it.
   *Source:* `CLAUDE.md` §3 ("explicit typed boundaries"), §2 Phase 3. *Constrained by:* 2.4, 2.5,
   3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 6.9, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
   2.5's "a port of its own", 4.7's sample line. *Realised in:* U3.
@@ -1127,6 +1130,40 @@ and Part 4 of `03-roadmap.md`).
   §3's "every entry point uses the same core" is satisfied by the structure rather than by a
   choice made here.
   *Source:* `CLAUDE.md` §3, R20. *Constrained by:* 3.1, 3.3, 3.5.
+
+- **3.9 What `UnitOfWork.commit()` may raise.** `[decided]`
+  *Decision:* the port declares **`TransactionFailed`**, defined in `application/ports.py` above
+  `UnitOfWork` by the rule that module already states. `SqlAlchemyUnitOfWork.commit()` translates
+  `SQLAlchemyError` into it and nothing else. `AdvanceOrderStatus` catches it beside
+  `OutboxWriteFailed` at the outbox mark, and nowhere else.
+
+  *What it repairs.* `mark_published` sets `published_at` and lets the `UPDATE` leave with the
+  transaction, because 2.5 turned autoflush off. So `except OutboxWriteFailed` guards the `SELECT`
+  and the missing row and never the write the method is named for, and a reader takes that write
+  as guarded. With the type, the catch covers what it claims.
+
+  *The window is narrow, and it is not the argument.* The `SELECT` one line earlier proves the
+  connection live, so the fault has to land between two adjacent statements — the window already
+  accepted when a `flush()` inside `mark_published` was rejected on 2026-08-12. What decides this
+  item is that the catch names an error its own operation cannot raise, and that `publish` and
+  `mark_published` declare their failures while `commit()` did not.
+
+  *Where it stops — `__exit__` is not translated.* Its `rollback()` runs during unwinding, so an
+  error raised there would replace the exception already in flight and lose the cause; and no
+  caller would act on it differently. `commit()` is called deliberately and its result can be
+  acted on, which is what earns it a declared error and leaves `__exit__` without one.
+
+  *No behavioural change at the first commit.* A failure there means the write did not happen, and
+  6.2 admits no deliberate `5xx`, so it reaches the entry point's `Exception` handler and returns
+  6.3's body with `500` — the same outcome as an untyped error, without SQLAlchemy crossing a layer.
+
+  *Rejected:* **leaving `commit()` untyped** with a comment naming what the catch omits — zero
+  code, but it documents a misleading catch instead of removing it; **`except Exception` at the
+  mark** — `CLAUDE.md` §6, and the same argument already settled at U3's step 5; **`flush()` inside
+  `mark_published`** — rejected on 2026-08-12, and it answers one call site rather than the
+  contract.
+  *Source:* 3.4's and 3.5's silence, recorded at U5's step 7. *Constrained by:* 2.5, 3.1, 6.2, 7.5.
+  *Amends:* 3.4's port surface. *Realised in:* U7.
 
 
 ## Topic 4 — Data model
