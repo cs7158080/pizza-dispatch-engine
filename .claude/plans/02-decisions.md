@@ -25,13 +25,13 @@ status markers, precisely so that this table cannot be contradicted.
 | 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1–8.9 | — |
-| 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
+| 9 — CLI | 9.1, 9.2, 9.3, 9.6 | 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **91** | **20** |
+| **Total** | **92** | **19** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2990,6 +2990,51 @@ and Part 4 of `03-roadmap.md`).
 
 
 ## Topic 9 — CLI
+
+- **9.1 Interaction style.** `[decided]`
+  *Decision:* a **numbered menu loop** — the menu is printed, a digit is read, the action runs, and
+  the menu is printed again. Built from `input()` and `print()` alone, since 2.10 approves no CLI
+  library; one prompt per field; blocks delimited as below.
+
+  *Why not the two alternatives.* **Sub-commands** (`cli place-order --customer …`) contradict 9.3:
+  each action would be its own `docker compose run`, so 1.2's steps 3–12 become ten container starts
+  and 9.5 has no process left to remember anything in. It is also the only one of the three needing
+  argument parsing. **A prompt-driven shell** — command words inside a loop — needs a parser and a
+  `help` screen, and buys flexibility nobody needs at one user and five actions. The menu is the
+  only form where what can be done is on the screen rather than in the user's memory.
+
+  *Frames, aligned columns and colour are built, and they fail 1.1's ceiling test.* Delete them and
+  no named DoD row falls; they are presentation. **They ship on the developer's decision that the
+  deliverable is also read by eye**, and the exception is recorded here rather than absorbed
+  silently, because 1.1's value is that it can be pointed at. What bounds it:
+  1. **Blocks are delimited by horizontal ASCII rules** — a title, a rule of `-`, the content, a
+     rule. **No vertical pipes:** a closed box needs every line padded to one width, and 4.2's
+     200-character address and 6.3's variable `detail` sentence would break the right edge — a
+     broken box reads worse than none. The rule spans the widest line in its block, so no width
+     constant exists to tune.
+  2. **ASCII only.** Box-drawing characters are Unicode and are exactly 9.6's class of failure.
+  3. **Aligned columns in one place** — the order list (6.6), where rows repeat. A single order stays
+     `key: value` lines; a one-row table is not a table. Widths are computed from the data, and
+     nothing is truncated.
+  4. **Four colour constants** — red for failure, green for success, bold for titles and prompts,
+     reset. No colour per status value. They are ANSI escape sequences written directly, so 2.10
+     does not move.
+  5. **Guarded by `sys.stdout.isatty()`** — when the output is not a terminal the four constants are
+     empty strings, so a redirected stream carries no escape codes.
+  6. **No variable disables colour.** 10.1 requires a decision record and the `PIZZA_` prefix for a
+     new variable, and there is nothing here to tune; the guard is the whole mechanism.
+  *Residual risk, stated:* a console that does not interpret ANSI shows `←[31m` instead of colour.
+  9.6 already directs the reviewer to PowerShell or CMD, and A21 makes that a README line, not code.
+  *Excluded on the same test:* screen clearing, command history, completion.
+  *The menu carries the same frame as the answers*, so the screen reads as one sequence of blocks.
+
+  *Two behaviours that belong to the loop and not to 9.4, because neither becomes a request:* an
+  unusable menu choice prints one line and loops; **`EOF` and `Ctrl-C` exit as `quit` does**, status
+  `0`. The second is not tidiness — 9.3 describes precisely the container that reads `EOF` at its
+  first prompt, and without two `except` clauses that arrives as a traceback.
+
+  *Source:* R11, DoD "Interactive CLI". *Constrained by:* 1.1, 1.2, 2.10, 9.3, 9.6, 10.1.
+  *Constrains:* 9.2, 9.4, 9.5. *Realised in:* U12.
 
 - **9.2 Menu actions.** `[decided]` · **reopen requested for U12's gate, 2026-08-12**
 
