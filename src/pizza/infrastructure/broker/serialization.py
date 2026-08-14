@@ -45,3 +45,16 @@ def deserialize(raw: bytes) -> OrderReadyEvent:
         )
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         raise SerializationError(f"not a valid ORDER_READY message: {error}") from error
+
+
+def deserialize_or_none(raw: bytes) -> OrderReadyEvent | None:
+    """Build an event, or return None when the bytes do not describe one.
+
+    For a caller that may not name `SerializationError`. The absent event is a
+    value the signature forces every caller to handle, so nothing else that goes
+    wrong inside is turned into one.
+    """
+    try:
+        return deserialize(raw)
+    except SerializationError:
+        return None

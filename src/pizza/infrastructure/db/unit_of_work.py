@@ -7,9 +7,10 @@ the mark is a second transaction, taken after the first one has ended.
 Leaving the block without `commit()` rolls back.
 """
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from pizza.application.ports import UnitOfWork
+from pizza.application.ports import TransactionFailed, UnitOfWork
 from pizza.infrastructure.db.outbox import SqlAlchemyOutboxStore
 from pizza.infrastructure.db.repositories import (
     SqlAlchemyDriverRepository,
@@ -40,6 +41,10 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self._session = None
 
     def commit(self) -> None:
+        """Raises TransactionFailed."""
         if self._session is None:
             raise RuntimeError("commit() outside the unit of work")
-        self._session.commit()
+        try:
+            self._session.commit()
+        except SQLAlchemyError as error:
+            raise TransactionFailed("could not commit the transaction") from error
