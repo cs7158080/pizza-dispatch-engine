@@ -28,10 +28,10 @@ status markers, precisely so that this table cannot be contradicted.
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
-| 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7 | 12.4, 12.5, 12.8–12.10 |
+| 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.5, 12.8 |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **93** | **18** |
+| **Total** | **95** | **16** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3731,6 +3731,95 @@ and Part 4 of `03-roadmap.md`).
   *Source:* `CLAUDE.md` §5. *Constrained by:* 11.9, 12.3, 12.4, 12.5, 14.7. *Constrains:* 12.9.
   *Realised in:* U10 for the two modules, U11 for the command 14.7 gains — the directories
   themselves have been on `main` since U1.
+
+- **12.9 Where results are surfaced.** `[decided]`
+  *Decision:* **console only, no report file** — and the `command` 11.9 left blank:
+
+  ```yaml
+  tests: command: ["pytest", "tests/integration", "-v", "-ra", "--durations=0", "--tb=short"]
+  ```
+
+  Exec form is 11.9's; the path is 12.7's and nothing is added to it. The PASS/FAIL summary
+  11.3 requires is a `pytest_terminal_summary` hook in `tests/integration/conftest.py`, which
+  writes `terminalreporter.write_sep("=", "PASS")` — or `"FAIL"` — keyed on pytest's exit
+  status. `PYTHONUNBUFFERED=1` (11.9) is what puts it in the stream on time.
+
+  | Flag | Why |
+  |---|---|
+  | `-v` | one line per test, by name. 12.4 budgets ~30 s, 12 s of it in one scenario; without it the reviewer watches silence, and the four scenarios 13.1 names are not visible as they run |
+  | `--durations=0` | every scenario's real time, which turns 12.4's per-scenario budget into something measured rather than asserted |
+  | `-ra` | a recap of everything that did not pass, gathered in one place rather than scattered through the run |
+  | `--tb=short` | the failing assertion and its values, without a full traceback in a shared stream |
+
+  *Why the banner is a hook and not a shell wrapper around the command.* 11.4 rests entirely on
+  pytest's exit status reaching `--exit-code-from tests`, and every shell form that prints a
+  banner is a place to lose it — `pytest … || echo FAIL` exits **zero**, so the CI gate would be
+  green forever and nothing would say so. The hook cannot break it: it prints beside the exit
+  status instead of between it and Compose. It also reads that status directly, so a run that
+  collected no tests at all (pytest's exit 5) prints `FAIL` rather than a green banner over an
+  empty run. *The one gap:* a usage error aborts before the hook, leaving no banner — the exit
+  is still non-zero and pytest's own error is the explanation.
+
+  *Where the banner actually lands, measured on the pinned pytest rather than assumed.* The hook
+  runs before pytest's own closing sections, so the order is `FAILURES`, the banner,
+  `--durations`, `-ra`'s recap, then the counts line — **the banner is not the last thing
+  printed, and no hook placement makes it so.** `short test summary info` and the counts are
+  written once every `pytest_terminal_summary` has run, and moving the call earlier in the
+  sequence only moves the banner further up. 11.3 asks for a summary that cannot be missed rather
+  than for a last line, and a full-width separator meets that wherever it sits.
+
+  *Why no report file.* `junit-xml` is built into pytest and needs no plugin, so 2.10's list is
+  not in question; what it lacks is a reader. It would hold less than what already survives the
+  run, and 12.3 declined the `outbox` on exactly this ground — a thing nothing in the system
+  reads. **What survives, until `down` or the next `up`:** the `tests` container exits but is not
+  removed (11.1, 11.5), so `docker compose logs tests` returns the whole run — named scenarios,
+  durations, tracebacks — with the api and worker lines that interleaved it in the live stream
+  stripped away. A shell into it is not available, because `exec` needs a running container;
+  `docker compose run --rm tests <command>` starts a fresh one from the same image against the
+  live stack, which is also how a single scenario is re-run by hand.
+  *Rejected — writing the file and bind-mounting a host directory for it:* a generated artifact
+  in the reviewer's clone, needing a `.gitignore` line, and written by 11.9's non-root `app` into
+  a directory owned by someone else — a failed write aborts pytest and colours a healthy stack
+  red in the one stream 11.3 wants clean.
+  *Rejected — writing it inside the container without a mount,* retrievable by
+  `docker compose cp`. The cost is genuinely one flag, and it is still declined: it duplicates,
+  in a format nobody here parses, a subset of what `docker compose logs tests` already gives.
+  *Source:* R15, `CLAUDE.md` §5. *Constrained by:* 11.1, 11.3, 11.4, 11.5, 11.9, 12.4, 12.7.
+  *Fills:* 11.9's `tests` row. *Feeds:* 13.4 — the absence of `junit-xml` and the flag that adds
+  it, and the three commands above. *Realised in:* U11.
+
+- **12.10 Whether lint and type checks run inside the compose test run.** `[decided]`
+  *Decision:* **local-only.** 2.8's three checks stay where 14.7 put them — a per-step
+  Definition of Done run from a local virtual environment — and nothing is added to the
+  `tests` service, whose command 12.9 fixed. **Nothing is built for this item.**
+
+  *Feasibility was never the question, so this is policy and not capability:* 3.7 and 11.9
+  install the dev group into the `test` stage for `pytest`, so `ruff` and `mypy` are already in
+  `pizza-test`, with `src/` and `tests/` both under `/app`.
+
+  *Why it is not built — 1.1's ceiling test, applied literally.* Delete the gate: which named
+  DoD row fails? *Test Automation* is `pytest` and is untouched; *Docker Deployment* does not
+  read a linter. None does, so it is not built.
+  *And it could not fire in any case.* The image is built from committed source, and §8.3 with
+  14.7 make the checks a condition of every commit; 2.9 pins the dev tools in the same
+  `requirements-dev.txt` that builds the local environment, so the versions match by
+  construction. A green result would prove nothing, and a red one would mean a commit that
+  skipped its own Definition of Done — a process failure a container cannot repair.
+
+  *Rejected — an eighth one-shot `lint` service.* 11.1 closed the list at seven.
+  *Rejected — chaining the checks into the `tests` command* as `ruff … && mypy … && pytest …`.
+  A style failure then suppresses `pytest` entirely, and with it the PASS/FAIL summary 11.3
+  requires — a decided item this one may not spend. It also lets a whitespace rule colour the
+  launch red over a system that works, which 11.5 leaves running in front of the reviewer.
+
+  *The one real argument for a gate, and what answers it:* the reviewer runs only the delivered
+  environment, so a check that ran on the author's machine is a claim they cannot verify. It is
+  answered by two commands rather than a gate, since the tools are in the image anyway —
+  `docker compose run --rm tests ruff check .` and `… mypy src tests`. Verification on demand,
+  without giving a style rule the power to stop the demonstration.
+  *Source:* `CLAUDE.md` §8. *Constrained by:* 1.1, 2.8, 2.9, 3.7, 11.1, 11.3, 11.5, 11.9, 12.9,
+  14.7. *Closes 2.8's deferral;* whether the checks run in CI stays 14.3's. *Feeds:* 13.4 — the
+  two commands above. *Realised in:* nothing; the README line is U13's.
 
 
 ## Topic 13 — Documentation and deliverables
