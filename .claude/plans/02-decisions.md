@@ -29,9 +29,9 @@ status markers, precisely so that this table cannot be contradicted.
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7 | 12.4, 12.5, 12.8–12.10 |
-| 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
+| 13 — Documentation | 13.1, 13.5, 13.6 | 13.2, 13.3, 13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **93** | **18** |
+| **Total** | **94** | **17** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3734,6 +3734,62 @@ and Part 4 of `03-roadmap.md`).
 
 
 ## Topic 13 — Documentation and deliverables
+
+- **13.1 README structure.** `[decided]`
+  *Decision:* **seven sections, and each one answers a named DoD row.** The assignment's
+  *Documentation* row asks for a **concise** README covering four topics; three more sections
+  come from other rows and from `CLAUDE.md` §7.
+
+  | Section | Contents | Required by |
+  |---|---|---|
+  | *(head)* | three lines — what the system is, and the stack | §7 — "written for someone who has never seen the project" |
+  | **Launch** | Compose v2.24 (11.10), `docker compose up` and what it prints (11.3), the API URL and `/docs` (11.8), `--build` (11.9), the CI-style gate (11.4), teardown with `docker compose down` (11.7), two lines on `.env.example` (10.3) | DoD *Docker Deployment*; *Documentation* — "launch execution" |
+  | **Using the CLI** | `docker compose run --rm cli` (9.3), the Git Bash / `winpty` note (9.6), then 1.2's thirteen steps as the run that shows the system — **including both outcomes of step 6** | DoD *Interactive CLI*; *Documentation* — "CLI client usage" |
+  | **How it works** | the sequence diagram. **Its format and placement are 13.2's, its count 13.3's** | DoD *System Design*; R17 |
+  | **Tests** | what runs at launch, the four scenario names one line each (12.2), re-running (12.9), the lint and type commands (12.10), and 11.6's determinism boundary — written with `down`, not `down -v` | DoD *Test Automation*; *Documentation* — "test instructions"; §5 |
+  | **Trade-offs** | 13.4's content, closing with what was deliberately not built (Part 5, by name) | *Documentation* — "design trade-offs"; §7 |
+  | **Assumptions** | the fifteen lines 13.6 marks **†**, one line each | §7; R23 |
+  | *(closing line)* | one sentence pointing at `docs/how-this-was-built.md` | 14.5, narrowed — below |
+
+  *The rule that produced the list is 1.1's own:* delete a section — which **named** DoD row
+  fails? Five answer a row directly; two answer `CLAUDE.md` §7. Nothing else survived.
+
+  *What the rule deleted, from an eleven-section draft:* **Configuration** as a heading — `.env`
+  belongs to the *Code Quality* row, which grades the code and not the README, so two lines
+  inside *Launch* carry it. **Out of scope** as a heading — "what was not built and why" is a
+  trade-off, and splitting one family across two headings is what "concise" forbids. **Local
+  development** — no row fails without it; the four pre-commit checks move to
+  `docs/how-this-was-built.md` and the `uv pip compile` block is written for a contributor who
+  does not exist. **The demo path as a section of its own** — eleven of its thirteen steps are
+  CLI actions, so 1.2's table **is** "CLI client usage" rather than something beside it. **A
+  table of endpoints** — 11.8 publishes the port so that FastAPI's generated document can be
+  read; a hand-written table is the same contract in a second place with nothing keeping the two
+  in step.
+
+  *Why the CLI section documents no menu:* 9.1 prints the five actions on every loop, so a
+  second copy could only go stale. What a reader cannot guess is the launch command and the Git
+  Bash failure, and that is exactly what is written.
+
+  *One closed record is narrowed here.* 14.5 requires *"a 'How this repository was built'
+  section in the README"*. That section is a reader's guide to `CLAUDE.md` and `.claude/plans/`,
+  and no DoD row names it — so under *Documentation*'s "concise" it becomes
+  **`docs/how-this-was-built.md`**, linked once from the README's last line. **14.5's decision is
+  untouched:** the planning record still ships and is still named from the README, and only its
+  container changes — which is the form 14.5's own condition asked for, *"linked once as optional
+  depth"*. 14.2's unit-branch sentence travels with it.
+
+  *Four groups of inputs above are closed on gate branches that have not merged* — 11.1,
+  11.8–11.11 (`plan/u9-gate`), 12.4, 12.5, 12.8 (`plan/u10-gate`), 12.9, 12.10
+  (`plan/u11-gate`) and topic 9 (`plan/u12-gate`). 14.3 provides for exactly this: a gate is
+  written when a session is free and merged when its contract is first needed. **U13 is the unit
+  that needs all four.**
+
+  *Rejected:* **the eleven-section draft** — above, written before the DoD table was in the
+  repository. **The README carrying the trade-offs in full rather than in summary** — 1.4 fixes
+  `02-decisions.md` as the only original.
+  *Source:* R19, DoD *Documentation*, `CLAUDE.md` §5, §7. *Constrained by:* 1.1, 1.2, 1.4, 9.1,
+  9.3, 9.6, 10.3, 11.4, 11.6–11.11, 12.2, 12.7, 12.9, 12.10, 13.6, 14.2. *Constrains:* 13.2,
+  13.3, 13.4. *Narrows:* 14.5's README requirement. *Realised in:* U13.
 
 - **13.5 `docs/ai-log.md`.** `[decided]`
   *Decision:* **nothing to decide — the file already exists and defines itself.** It specifies
