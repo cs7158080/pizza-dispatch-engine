@@ -3588,7 +3588,7 @@ and Part 4 of `03-roadmap.md`).
   |---|---|
   | `-v` | one line per test, by name. 12.4 budgets ~30 s, 12 s of it in one scenario; without it the reviewer watches silence, and the four scenarios 13.1 names are not visible as they run |
   | `--durations=0` | every scenario's real time, which turns 12.4's per-scenario budget into something measured rather than asserted |
-  | `-ra` | a recap of everything that did not pass, landing immediately before the banner |
+  | `-ra` | a recap of everything that did not pass, gathered in one place rather than scattered through the run |
   | `--tb=short` | the failing assertion and its values, without a full traceback in a shared stream |
 
   *Why the banner is a hook and not a shell wrapper around the command.* 11.4 rests entirely on
@@ -3599,6 +3599,14 @@ and Part 4 of `03-roadmap.md`).
   collected no tests at all (pytest's exit 5) prints `FAIL` rather than a green banner over an
   empty run. *The one gap:* a usage error aborts before the hook, leaving no banner — the exit
   is still non-zero and pytest's own error is the explanation.
+
+  *Where the banner actually lands, measured on the pinned pytest rather than assumed.* The hook
+  runs before pytest's own closing sections, so the order is `FAILURES`, the banner,
+  `--durations`, `-ra`'s recap, then the counts line — **the banner is not the last thing
+  printed, and no hook placement makes it so.** `short test summary info` and the counts are
+  written once every `pytest_terminal_summary` has run, and moving the call earlier in the
+  sequence only moves the banner further up. 11.3 asks for a summary that cannot be missed rather
+  than for a last line, and a full-width separator meets that wherever it sits.
 
   *Why no report file.* `junit-xml` is built into pytest and needs no plugin, so 2.10's list is
   not in question; what it lacks is a reader. It would hold less than what already survives the
@@ -3621,7 +3629,7 @@ and Part 4 of `03-roadmap.md`).
   it, and the three commands above. *Realised in:* U11.
 
 - **12.10 Whether lint and type checks run inside the compose test run.** `[decided]`
-  *Decision:* **local-only.** 2.8's four commands stay where 14.7 put them — a per-step
+  *Decision:* **local-only.** 2.8's three checks stay where 14.7 put them — a per-step
   Definition of Done run from a local virtual environment — and nothing is added to the
   `tests` service, whose command 12.9 fixed. **Nothing is built for this item.**
 
