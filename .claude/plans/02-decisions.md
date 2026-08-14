@@ -2905,6 +2905,29 @@ and Part 4 of `03-roadmap.md`).
   counted — neither is an assumption that the system is ready after N seconds. Compose starts
   everything the graph allows in parallel, so the waits overlap rather than sum.
 
+  **The api's 5 s covers its probe, and this is the hand-off U7 left open rather than a margin
+  chosen by feel.** U7 measured `database_reachable` answering `False` only after 130 seconds
+  against a database refusing the connection, on Windows, and handed the number here as the first
+  unit that could observe it on Linux. **Measured on Linux containers, it does not reproduce**, with
+  the pinned `psycopg` and the engine the api actually builds:
+
+  | State the probe meets | Answers | After |
+  |---|---|---|
+  | postgres up and serving | `True` | 0.01 s |
+  | the container stopped | `False` | 3.84 s |
+  | postgres still initialising | `False` | 0.00 s, turning `True` at 1.57 s |
+  | an address on the network with nothing on it | `False` | 3.14 s |
+  | an off-network address dropping `SYN` in silence | `False` | 21.05 s |
+
+  The first four are every failure state Compose has, and 5 s clears all of them. **No connect
+  timeout is added, and 10.4 gains no value** — the hand-off named one only if the delay held.
+  *The margin is thin and stated so nobody widens it by reflex:* the worst real case is about 4 s
+  once the HTTP round trip is added. It changes no behaviour, because a check killed at its
+  `timeout` is recorded as a failure, which is the same answer a slow `503` gives.
+  *Revisit if the database stops being a container on this network* (3.8's condition). The bound
+  above is the network's — an address that refuses or is unreachable answers at once, and only the
+  last row, which Compose cannot produce, is slow enough to matter.
+
   **No `stop_grace_period` is written, for any service.** 8.8 handed it here and fixes that the
   worker stops after the message in hand, which takes milliseconds — so the default is never reached
   and a value here would be a number nothing derives. `stop_signal` on `postgres` is left alone on
@@ -2918,7 +2941,8 @@ and Part 4 of `03-roadmap.md`).
   *Assumption:* long-form `depends_on` conditions require Compose v2, as 9.3 assumed for `profiles`;
   **11.10 confirms it**.
   *Source:* R14, R15, `CLAUDE.md` §5. *Constrained by:* 2.5, 4.6, 6.6, 7.1, 7.6, 8.8, 9.3, 9.6,
-  10.1, 11.3, 11.7. *Holds:* 8.8's three hand-offs. *Constrains:* 11.10, 11.11. *Realised in:* U9.
+  10.1, 11.3, 11.7. *Holds:* 8.8's three hand-offs, and U7's on the probe. *Constrains:* 11.10,
+  11.11. *Realised in:* U9.
 
 - **11.3 How the test suite is auto-executed.** `[decided]`
   *Decision:* a **one-shot test service** in compose that waits for the stack to be healthy
