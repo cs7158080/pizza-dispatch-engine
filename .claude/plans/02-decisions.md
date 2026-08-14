@@ -25,13 +25,13 @@ status markers, precisely so that this table cannot be contradicted.
 | 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1–8.9 | — |
-| 9 — CLI | 9.1, 9.2, 9.3, 9.5, 9.6 | 9.4 |
+| 9 — CLI | 9.1–9.6 | — |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **93** | **18** |
+| **Total** | **94** | **17** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3149,6 +3149,54 @@ and Part 4 of `03-roadmap.md`).
   *Assumption:* `profiles` requires Compose v2; 11.10 confirms it.
   *Source:* R11, R14, R16. *Constrained by:* 3.6, 9.2, 9.6. *Constrains:* 1.2, 11.8.
   *Feeds:* 3.7, 11.1.
+
+- **9.4 Validation and error presentation.** `[decided]`
+  *Decision:* **the CLI validates no content at all.** It sends what it was given and renders what
+  comes back, in three shapes: an API error, a transport failure, and an unexpected response.
+
+  *Why nothing is validated locally.* 4.2's bounds — 100, 200, 1-to-20 — would then be written in
+  two places, and 13.6's drift is what follows. This repository already declined the same trade once
+  for the same reason: `VARCHAR(n)` was rejected on the database columns because *a type does not
+  drift, a bound written twice does*. **Nor is "just emptiness" an exception:** 4.2 states
+  `non-empty` in the same line it states `≤ 100`, so there is no principle separating them, only an
+  impression that one is smaller. *Cost:* a typo costs one round trip and an error screen.
+  *What this answers, which 9.1 left open:* an empty items list is sent and returns `422` like
+  anything else. There is no special case.
+  *Not validation, and decided elsewhere:* an unusable menu choice (9.1) and the fourth action with
+  nothing selected (9.5). Neither becomes a request.
+
+  *Two error bodies, because 6.3 defines two.* `detail` is a sentence on `404`, `409` and `503`, and
+  a list of per-field objects on `422` — 6.3 states that its type varies with the class of failure.
+  A sentence is printed as it stands. A `422` is flattened to one line per entry, `loc` without its
+  leading `body` element and `msg`; **`type` is not shown**, being a machine identifier for which
+  6.3 already established there is no consumer. Rendering a published shape is what 3.6 permits a
+  client to know, and a shape that changed would make the output ugly rather than wrong.
+
+  *A transport failure is a different screen, because there is no status code and no body.* The
+  block names the base URL it tried, taken from `PIZZA_API_BASE_URL` (10.1) — without it the
+  reviewer knows only that nothing worked, not what was addressed. This closes the question 9.3
+  handed here. **An unexpected status** — anything outside 6.2's table, `500` first among them — is
+  shown with its code and its raw body, labelled as unexpected: 6.2 calls a `500` a defect rather
+  than a contract, and a screen that dresses it as an ordinary error hides the one thing that needs
+  to be seen.
+
+  *Every error returns to the menu.* The CLI never exits on a failed call, and **nothing is retried
+  automatically** — no requirement asks for it and 1.1 removes it.
+
+  *The client timeout is set explicitly to 15 seconds, and the number is derived.* 10.4 leaves
+  `httpx` at its own 5 s default, noting that *nothing has asked to change it*; this item is the
+  asking. 10.4 also records that 7.5 bounds a `PATCH` at **twice**
+  `PIZZA_BROKER_PUBLISH_TIMEOUT_SECONDS`, so ten seconds — which means that against an unreachable
+  broker the client would abandon a request the API answers `200` under 7.6, and report a failure
+  for an operation that succeeded. That path is not in 1.2's demo but it is the experiment 13.4
+  invites a reviewer to run, so the contradiction would be with our own documentation. Fifteen
+  clears the ten with room for connection and response, one value for every call rather than one per
+  endpoint, **and not an environment variable** — 10.1 requires a record and the `PIZZA_` prefix for
+  a new one, and a number derived from another number is not a knob.
+  *Noted, not edited:* 10.4's *"Nothing has asked to change it"* is now stale. The sentence belongs
+  to a decided item in a merged topic and is left for the developer.
+  *Source:* R11, `CLAUDE.md` §3. *Constrained by:* 1.1, 4.2, 6.2, 6.3, 9.1, 9.3, 10.1, 10.4.
+  *Realised in:* U12.
 
 - **9.5 Client-side state.** `[decided]`
   *Decision:* **one thing is remembered — the selected order's id — in memory, for the life of the
