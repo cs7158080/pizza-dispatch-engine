@@ -2759,6 +2759,14 @@ and Part 4 of `03-roadmap.md`).
   *The list is closed at seven.* The inventory's "any init/migration service" is one slot and 4.6
   filled it. FW2's relay would be the eighth and is not built.
 
+  **Six of the seven are written by U9; `tests` is written by U11, and the split is the record's
+  own rather than a convenience.** 12.9 fixes that service's `command` and carries *Realised in:*
+  U11; 12.7 gives its `conftest.py` to U10; and 11.3, 11.4 and 11.5 — everything the service is
+  for — are U11's *Decided by* list. A `tests` service written here would therefore run `pytest`
+  against an empty package, which exits `5`, until two later units filled it. **What U9 owns is the
+  list and its shape; what U11 adds is one service into a file that already defines the other
+  six**, together with its two edges in 11.2's graph.
+
   *The two vendor tags — a convention, and the pin is not.* **This item left both unwritten when it
   first closed**, which would have left U9's Phase 3 plan to invent them, and `CLAUDE.md` §2 forbids a
   plan that contains a decision. Nothing in the design distinguishes recent majors: 8.9's
@@ -2814,8 +2822,8 @@ and Part 4 of `03-roadmap.md`).
   exec-form requirement 8.8 hands on — 11.9, so that one form is fixed in one place. The
   `environment:` blocks are none of these: they transcribe 10.1's table, which 10.3 already left to
   U9 by name.
-  *Source:* R14, R15. *Constrained by:* 1.2, 2.1, 2.2, 3.7, 4.6, 9.3, 10.1, 10.3, 11.3, 11.4.
-  *Constrains:* 11.2, 11.9, 11.10. *Realised in:* U9.
+  *Source:* R14, R15. *Constrained by:* 1.2, 2.1, 2.2, 3.7, 4.6, 9.3, 10.1, 10.3, 11.3, 11.4, 12.9.
+  *Constrains:* 11.2, 11.9, 11.10. *Realised in:* U9 for six services, U11 for `tests`.
 
 - **11.2 Readiness and ordering.** `[decided]`
   *Decision:* **Compose conditions alone. Nothing under `src/` waits for anything.** The inventory
@@ -2890,6 +2898,10 @@ and Part 4 of `03-roadmap.md`).
   statement of it that could later disagree.
   *`cli` waits on the API* (9.3 left `depends_on` here), so `docker compose run --rm cli` works
   whether or not the stack is already up.
+  **The graph is decided whole here and written in two parts**, because 11.1 gives the `tests`
+  service to U11: its two edges arrive with it, and the rest of the graph is U9's. Nothing about
+  them is left to that unit to decide — they are stated above with their reasons, and U11
+  transcribes them.
 
   **The intervals.**
 
@@ -2942,7 +2954,7 @@ and Part 4 of `03-roadmap.md`).
   **11.10 confirms it**.
   *Source:* R14, R15, `CLAUDE.md` §5. *Constrained by:* 2.5, 4.6, 6.6, 7.1, 7.6, 8.8, 9.3, 9.6,
   10.1, 11.3, 11.7. *Holds:* 8.8's three hand-offs, and U7's on the probe. *Constrains:* 11.10,
-  11.11. *Realised in:* U9.
+  11.11. *Realised in:* U9, except the two `tests` edges, which land with the service in U11.
 
 - **11.3 How the test suite is auto-executed.** `[decided]`
   *Decision:* a **one-shot test service** in compose that waits for the stack to be healthy
@@ -3165,7 +3177,7 @@ and Part 4 of `03-roadmap.md`).
   | `worker` | `["python", "-m", "pizza.entrypoints.worker.main"]` |
   | `schema` | `["python", "-m", "pizza.entrypoints.schema.main"]` |
   | `cli` | `["python", "-m", "pizza.entrypoints.cli.main"]` |
-  | `tests` | **not fixed here** — 12.9 is open and U11's; this item binds only the form |
+  | `tests` | **not written here** — 12.9 fixes it, and it arrives with the service in U11; this item binds only the form |
 
   The literal `8000` is 10.4's, which fixed the internal port as a constant in the image's command
   rather than a variable. The `CMD` is the API because a bare `docker run` should do something
@@ -3178,8 +3190,9 @@ and Part 4 of `03-roadmap.md`).
   above — the dependency layer before the source, the `.dockerignore`, and a `slim` base — and not by
   a fourth.
   *Source:* R14, DoD "Docker Deployment". *Constrained by:* 2.5, 2.9, 2.10, 3.3, 3.7, 8.8, 10.4,
-  11.1, 11.3. *Extends:* 8.8's exec-form requirement to Compose's `command:`. *Leaves to U11:* the
-  `tests` command (12.9). *Realised in:* U9.
+  11.1, 11.3, 12.9. *Extends:* 8.8's exec-form requirement to Compose's `command:`. *Leaves to
+  U11:* the `tests` command (12.9), with the service. *Realised in:* U9 for the four commands
+  above and the `Dockerfile`.
 
 - **11.10 Compose command form.** `[decided]`
   *Decision:* **`docker compose` — the v2 plugin — with a documented prerequisite of
