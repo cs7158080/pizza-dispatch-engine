@@ -29,9 +29,9 @@ status markers, precisely so that this table cannot be contradicted.
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7 | 12.4, 12.5, 12.8–12.10 |
-| 13 — Documentation | 13.1, 13.2, 13.3, 13.5, 13.6 | 13.4 |
+| 13 — Documentation | 13.1–13.6 | — |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **96** | **15** |
+| **Total** | **97** | **14** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3839,6 +3839,69 @@ and Part 4 of `03-roadmap.md`).
   diagram for two arrows. Neither the `schema` one-shot nor the `tests` service appears — 11.1
   lists them, and R17 asks for the request path.
   *Source:* R17, DoD *System Design*. *Constrained by:* 1.2, 11.1, 13.2. *Realised in:* U13.
+
+- **13.4 Trade-off log content.** `[decided]`
+  *Decision:* **eight entries and one selection rule**, in the README's *Trade-offs* section
+  (13.1). Each is three to six lines: what was chosen, what was rejected, what it costs.
+
+  *The rule:* **an entry is written when a reviewer would otherwise read the delivered system as a
+  mistake.** That admits what looks like an omission (no migrations, no second test stack), what
+  departs from the orthodox arrangement (publishing after the commit, tests that touch no
+  database), and what carries a visible cost (`200` on a status update whose event was lost). It
+  excludes choices with no genuine alternative — 1.3 filtered those once already, and a section
+  that defends `ruff` buries the eight that matter.
+
+  | # | Entry | Assembled from |
+  |---|---|---|
+  | 1 | RabbitMQ and PostgreSQL, chosen as a pair | 2.1, 2.2, A1 |
+  | 2 | **The publish happens after the commit** — the accepted lost event, the `outbox` row that records it, and the experiment that shows it | 7.5, 7.6, 9.4, 11.11, FW2 |
+  | 3 | Retry through a dead-letter exchange and a TTL, not an immediate requeue | 8.2, 8.3 |
+  | 4 | A synchronous runtime, and the condition that would turn it over | 2.4, FW12 |
+  | 5 | One worker, and nothing in the code assumes it | 8.5, 8.9, FW7 |
+  | 6 | Every launch starts from empty, and there is no second test stack | 11.6, 11.7, FW13 |
+  | 7 | No schema migrations, and the condition that reverses it | 4.6, FW16 |
+  | 8 | The tests assert through the contract, never through the schema | 12.3 |
+
+  *Entry 2 is the only one carrying a command, and that is deliberate:* `docker compose stop
+  rabbitmq`, then a status update — `200`, and the order stays `PENDING`. 11.11 named the command,
+  9.4 sized the CLI's 15 s timeout so that the experiment cannot contradict the page describing
+  it, and 11.8 sent the path here rather than publish the database port for it. **An invitation to
+  disprove us reads stronger than a paragraph asserting we thought about it.**
+
+  *Entry 6 leads with the clean start, not with the absence of isolation.* Nothing is persisted,
+  so no run inherits another's residue — which is the property an ephemeral test environment
+  exists to provide, and this environment has it. Leading with what is missing would raise the
+  objection before the answer; and the entry names FW13 as this project's own future work, which
+  is what shows the norm was known rather than overlooked.
+
+  *Form, and it is 1.4's rule made concrete.* No entry carries an item number: "see 7.5" is noise
+  to a reader who has not opened the planning record, and 14.5 requires the README to stand alone.
+  The section ends with **one** pointer to `.claude/plans/02-decisions.md`, which is the "linked
+  once as optional depth" that item asks for. Nothing here is written first — each entry summarises
+  a record that already exists, per 1.4's *"a derived view, never a second original"*.
+
+  *What closes the section:* six lines naming what a reviewer would look for and not find —
+  authentication, driver endpoints beyond registration, order filtering and paging, structured
+  order items, metrics and tracing, an isolated test environment — then one line pointing at Part 5
+  of `03-roadmap.md` for the full register. **No `FW` code appears in the README**; the codes are
+  internal and carry no meaning to a reader.
+
+  *A ninth entry was rejected in review, and its content placed rather than dropped.* What the
+  launch does not gate — no report file (12.9), no lint or type gate (12.10) — has no heavy
+  alternative under the rule above; it is a note, not a trade-off. Both records read *Feeds:
+  13.4*, so: `--junit-xml=` becomes one sentence in *Tests*, beside the decision it reverses, and
+  12.10's two `docker compose run --rm tests` commands go to `docs/how-this-was-built.md` beside
+  the pre-commit checks — which is where 12.10's own argument lands, since that file is what claims
+  those checks ran. *13.1's Tests row is narrowed with it:* the lint and type commands leave it,
+  the log and single-scenario commands stay.
+
+  *Rejected:* **an entry per decision that has a genuine alternative** — 1.3's filter admits far
+  more than eight, and the section would restate the record instead of summarising it, which is
+  what 1.4 forbids. **The squash-merge and branch workflow** — process rather than design, and
+  14.5's file already holds it.
+  *Source:* R19, DoD *Documentation*, `CLAUDE.md` §7. *Constrained by:* 1.2, 1.4, 2.1, 2.2, 2.4,
+  4.6, 7.5, 7.6, 8.2, 8.3, 8.5, 8.9, 9.4, 11.6–11.8, 11.11, 12.3, 12.9, 12.10, 13.1, 14.5.
+  *Narrows:* 13.1's Tests row, and 12.9's and 12.10's *Feeds* lines. *Realised in:* U13.
 
 - **13.5 `docs/ai-log.md`.** `[decided]`
   *Decision:* **nothing to decide — the file already exists and defines itself.** It specifies
