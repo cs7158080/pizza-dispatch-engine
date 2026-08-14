@@ -3148,11 +3148,22 @@ and Part 4 of `03-roadmap.md`).
   *The base, and the one hole left open deliberately.* `slim` is 3.7's and the 3.12 family is 2.9's;
   **Alpine is unavailable rather than declined** — 2.5 and 2.10 both record that `psycopg[binary]`
   ships no musl wheel, so an Alpine base breaks the approved list. The tag is **not** pinned to a
-  digest: 2.9's two generated requirements files already lock everything we chose, and what a
+  digest: 2.9's two generated requirements files lock everything that **runs**, and what a
   floating tag still brings is OS security patches. A digest would trade those for a reproducibility
   nothing here consumes, in an environment `docker compose down` destroys (A19). *This is a real gap
   and it is chosen, not missed:* a base rebuilt months later is not byte-identical to the one this
   was developed against.
+
+  **The build backend is the exception, and the claim above was written wider than it holds.** `uv
+  pip compile` reads `[project].dependencies` and not `[build-system].requires`, which is correct —
+  a build requirement is not a runtime one — so `setuptools>=68` appears in neither generated file.
+  `pip install --no-deps .` then resolves it from PyPI, unpinned, under build isolation, and it does
+  so again every time the layer copying `src/` is invalidated. **Nothing is changed for it:** what
+  the backend produces from a src-layout package is stable across its versions, so the exposure is
+  reproducibility of the build rather than of what ships, which is the same trade the floating tag
+  already accepts one line above. Pinning it has no clean home either — the requirements files are
+  generated and would make it a runtime dependency, and a literal version in this file is what 2.9
+  exists to prevent.
   *Rejected — a third "builder" stage* installing into a separate prefix and copying only the result
   into a clean final image. Its purpose is to leave a compiler toolchain behind, and **there is never
   one to leave**: `psycopg[binary]` was chosen precisely so that nothing compiles. A third stage with
