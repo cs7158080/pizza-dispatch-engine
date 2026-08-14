@@ -3994,8 +3994,8 @@ and Part 4 of `03-roadmap.md`).
   |---|---|
   | U1 | `ruff format --check .` · `ruff check .` · `mypy src tests` · `python -c "import pizza"` |
   | U2 | + `pytest tests/unit` |
-  | U9 | + `docker compose up` reaches 11.3's PASS summary and the test service exits zero |
-  | U11 | + the same with the full integration suite |
+  | U9 | + `docker compose up` brings every service the file defines to the state 11.2's graph requires, and the stack stays up |
+  | U11 | + the `tests` service runs the suite, prints 11.3's PASS summary, and exits zero |
 
   `python -c "import pizza"` is not filler: 3.3 chose src-layout so an import resolves only
   through the install, so its failure means the package is not installed.
@@ -4006,8 +4006,19 @@ and Part 4 of `03-roadmap.md`).
   Phase 3 document may fill a silence this file left but may not amend one of its rows.
   Each Phase 3 document states its own list, and it applies **per step commit** — so `main`
   satisfies §8.6 after a merge by construction.
+  *The U9 and U11 rows were rewritten on 2026-08-14, and the U9 row was unsatisfiable as written.*
+  It required 11.3's PASS summary, which U9 cannot produce: the `tests` service is U11's, 12.7
+  gives its `conftest.py` to U10, and the four scenarios are 12.2's — so `pytest tests/integration`
+  against the empty package exits `5`, measured rather than reasoned. The rows now name what each
+  unit can actually reach. **This is the row's own rule applied to itself:** the bar is the
+  strongest verification the system supports at that point, and at U9 that is the environment
+  coming up, not a suite that does not exist yet. The U11 row said *"the same with the full
+  integration suite"* and now states its condition outright, because "the same" pointed at a row
+  that no longer names a suite.
   *Rejected:* treating it as vacuous until U9 — §8.6 would be ceremony for eight units, and
-  nobody starts believing it later.
+  nobody starts believing it later. **Leaving the U9 row and letting U9 write the `tests` service
+  to satisfy it** — it buys a red container between two merges, requires amending 12.9 on `main`,
+  and empties U11; the reasoning is in 11.1 and in `docs/ai-log.md`.
   *Source:* `CLAUDE.md` §8. *Constrained by:* 14.4. *Constrains:* every Phase 3 document.
 
 
