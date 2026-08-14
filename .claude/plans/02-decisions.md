@@ -3036,39 +3036,84 @@ and Part 4 of `03-roadmap.md`).
   *Source:* R11, DoD "Interactive CLI". *Constrained by:* 1.1, 1.2, 2.10, 9.3, 9.6, 10.1.
   *Constrains:* 9.2, 9.4, 9.5. *Realised in:* U12.
 
-- **9.2 Menu actions.** `[decided]` · **reopen requested for U12's gate, 2026-08-12**
-
-  **The developer has asked to re-decide the status action.** The record below stands and
-  governs until U12's gate revisits it — this is a request to re-open, not a repeal, and no
-  other unit is affected: the core takes a requested status and decides, and does not care who
-  chose it or how. What is reopened is the fourth action alone — whether the CLI offers all five
-  status values, or a single "advance" that moves the order to the next one.
-  *What any new form has to answer, because neither objection has gone away:* it must not put
-  5.1's transition sequence inside the client, which 3.6 forbids in one sentence; and it must
-  leave the `409` path reachable from the interface a reviewer is handed, or 5.2 becomes
-  something read about rather than demonstrated.
-
+- **9.2 Menu actions.** `[decided]` · *fourth action re-decided at U12's gate, 2026-08-14*
   *Decision:* five actions —
   1. place an order
   2. register a driver
   3. list orders and select one (by customer name, via `GET /orders` — A14)
-  4. update the selected order's status — the user picks from the five values
+  4. update the selected order's status — the user picks from the five values, in a sub-menu that
+     draws the chain and marks where the order stands
   5. quit
+
   *Why status update is included:* the entire behaviour of the system is dispatch triggered by
-  `BAKING`. Without it the CLI demonstrates half a product — create an order, register a
-  driver, then reach for `curl` to make anything happen. The DoD asks for a client that
-  "allows manual interaction with the running API services", not for the three calls named in
-  R11, and the demo path (1.2) does not run without it.
-  *Why the menu offers all five statuses rather than only the legal next one:* because the chain
-  is strictly linear (A3), exactly one of the five is legal at any moment, and a single
-  `Advance to BAKING` action was the obvious simplification. It was rejected on two counts. It
-  would place the transition sequence 5.1 owns inside the client, which 3.6 forbids; and it
-  would make the `409` path unreachable from the CLI, so a reviewer could never see the system
-  refuse an illegal transition through the interface they were handed. Offering all five keeps
-  the client free of business knowledge and makes 5.2 demonstrable rather than merely described.
-  *Accepted cost:* at any moment four of the five choices return `409`. The error is displayed,
-  not hidden — and showing it is part of the point.
-  *Source:* R11, R19. *Answers:* Q19.
+  `BAKING`. Without it the CLI demonstrates half a product — create an order, register a driver,
+  then reach for `curl` to make anything happen. The DoD asks for a client that "allows manual
+  interaction with the running API services", not for the three calls named in R11, and the demo
+  path (1.2) does not run without it.
+
+  *The reopen, and what it found.* The developer asked to re-decide the fourth action against a
+  single "advance" that moves the order to the next status. **No form of `advance` survives the two
+  conditions the reopen itself set** — the client must not hold 5.1's sequence, and 5.2's `409` must
+  stay reachable from the interface a reviewer is handed:
+
+  | Form | Fails on |
+  |---|---|
+  | The client computes the next status from a list it holds | 5.1's sequence executing in an adapter, which 3.6 rejects by name — and the `409` becomes unreachable |
+  | The API publishes the next status as a field | A change to 6.1's nine keys with topic 6 closed; and the `409` still needs the five kept selectable, so `advance` is an extra action rather than a smaller menu |
+  | Trying values until one succeeds | Four rejected requests per move |
+
+  Recorded as **FW18**, where the second route is named as the one worth taking.
+
+  *What the reopen did change — the presentation, which is where the real objection was.* The menu
+  now shows the chain with the order's position marked, above the five choices:
+
+  ```
+  RECEIVED → PREPARING → [ BAKING ] → READY → DELIVERED
+  ```
+
+  The current status is echoed from the response the CLI has just read (9.5), not computed. The five
+  values are listed in the order the contract publishes them — `OrderStatus` declares them in chain
+  order and FastAPI carries declaration order into the generated document — so the reviewer sees
+  what comes next without the client asserting it, and every one of the five stays selectable, which
+  is what 1.2's step 11 needs.
+
+  *The line this rests on, because the client does hold the order and pretending otherwise is
+  false.* The developer's objection was that a list in chain order **is** the sequence, and it is.
+  What separates the permitted form from the forbidden one is not knowledge but authority:
+
+  > The list is displayed and selected from. **The number that picks from it comes from the user's
+  > keystroke alone, and is never derived from another status.**
+
+  `STATUSES[choice - 1]` is permitted — the position came from a person. `STATUSES[index(current) + 1]`
+  is not — the client has decided which status follows which. The practical difference is that a
+  stale display leaves the user every option and the API adjudicates, while a stale computation
+  substitutes the client's judgement and removes the alternatives.
+
+  *Where the five names live, and why it is a constant rather than a call.* `OrderStatus` exists in
+  `domain/order.py`, and the CLI may not import it: 3.6 rejects a client that imports the core,
+  because `domain/` would then serve two consumers and an API change could no longer be verified
+  through the API alone. Reading the names at runtime from the generated OpenAPI document was
+  rejected as a network call, a JSON traversal and a failure path bought for five strings, and 1.2
+  keeps the demo to one tool. **What ships is a module-level constant of five strings in
+  `entrypoints/cli/`** — which 3.6 already permits, listing the status names among the published
+  contract a client must hold to call the API at all.
+  *The cost, stated:* a second copy of the five names exists and nothing checks that it agrees with
+  `domain/order.py`. Drift produces a `422` (6.1), which is a visible error rather than a wrong
+  state — 3.6's own test, answered on the harmless side.
+  *Rejected — a constants module shared with 12.3's suite:* a speculative abstraction for five
+  strings, and a test that imports the constant it asserts against asserts nothing.
+
+  *Accepted cost, at its real size.* Every choice is still the user's, and four of the five return
+  `409` at any moment. The diagram removes the guessing, not the arithmetic. The error is displayed
+  rather than hidden, and showing it is part of the point.
+  *Corrected while re-deciding:* 6.3 claims its `409` message "tells them what to do next". It names
+  the current status and the rejected one — *"Cannot advance order from BAKING to PREPARING"* — and
+  does not name the legal successor. The diagram is what does that work now.
+
+  *A sub-menu, not five more top-level entries*, so the main menu stays the five lines 1.2 walks.
+  *Left to 9.5:* what happens when the fourth action is chosen with no order selected.
+  *Source:* R11, R19. *Constrained by:* 1.1, 1.2, 3.6, 5.1, 5.2, 6.1, 6.3, 9.1. *Constrains:* 9.4,
+  9.5. *Answers:* Q19. *Defers:* FW18.
 
 - **9.3 How the CLI is run.** `[decided]`
   *Decision:* **`docker compose run --rm cli`.** The CLI is a service in the one compose file,
