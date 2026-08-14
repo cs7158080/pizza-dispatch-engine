@@ -25,13 +25,13 @@ status markers, precisely so that this table cannot be contradicted.
 | 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1–8.9 | — |
-| 9 — CLI | 9.1, 9.2, 9.3, 9.6 | 9.4, 9.5 |
+| 9 — CLI | 9.1, 9.2, 9.3, 9.5, 9.6 | 9.4 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **92** | **19** |
+| **Total** | **93** | **18** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3149,6 +3149,34 @@ and Part 4 of `03-roadmap.md`).
   *Assumption:* `profiles` requires Compose v2; 11.10 confirms it.
   *Source:* R11, R14, R16. *Constrained by:* 3.6, 9.2, 9.6. *Constrains:* 1.2, 11.8.
   *Feeds:* 3.7, 11.1.
+
+- **9.5 Client-side state.** `[decided]`
+  *Decision:* **one thing is remembered — the selected order's id — in memory, for the life of the
+  process.** Selecting an order fetches it and displays it; every later screen re-reads it.
+
+  *Why the id alone and not the order it came in.* A cached order carries a status, and the worker
+  changes orders between actions — 1.2's step 9 is exactly that. 9.2's status screen prints the
+  current status, so a cache would make that line untrustworthy in the one case it exists for. An id
+  cannot go stale: an order never changes identity and none is deleted, and if one somehow were, the
+  answer is a visible `404`. *Cost:* one `GET /orders/{id}` before each screen that shows the order.
+
+  **Selection fetches and displays the order, and this is what makes 1.2's step 9 reachable.** Step 9
+  re-reads an order after the worker assigned a driver, so it needs the nested driver — which
+  `GET /orders` does not carry (6.6) and which no `PATCH` response is involved to supply. Without a
+  fetch on selection there is no menu action that can show it, and 9.2's list of five is closed. The
+  reviewer runs action 3 again.
+
+  *The rest, each in a line.* **Creating an order does not select it** — 6.1 answers `POST` with the
+  id alone, so there would be nothing to display, and `CLAUDE.md` §3 wants one explicit way to
+  select. **The fourth action with nothing selected** prints one line and returns to the menu; it
+  never becomes a request, so it belongs here and not to 9.4, and the list is not run for the user —
+  that is hidden control flow. **The list shows a selector column and four of `OrderSummary`'s five
+  fields, without the id** — 36 characters per row buying nothing once selection is by number, and
+  the full id is on the screen the selection opens. **The selector number is not an identity:** it is
+  regenerated per listing and 6.6 sorts newest first, so a new order shifts every row; what is stored
+  is the id. **Nothing is written to disk.** **The last registered driver's id is not kept** — A9
+  leaves no endpoint that accepts one.
+  *Source:* R11, `CLAUDE.md` §3. *Constrained by:* 1.2, 3.6, 6.1, 6.6, 9.1, 9.2. *Realised in:* U12.
 
 - **9.6 Windows and TTY behaviour.** `[decided]`
   Three points of friction between a Windows development host and a Linux container target,
