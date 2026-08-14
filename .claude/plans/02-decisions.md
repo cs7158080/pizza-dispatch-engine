@@ -686,10 +686,10 @@ and Part 4 of `03-roadmap.md`).
   ```
 
   *The rule, written so it can be checked in a diff:* **no module under `domain/` or
-  `application/` names `infrastructure` in an import, and outside the two `main.py` files no
-  module under `entrypoints/` does either.** `infrastructure/` imports `application/` in order
-  to implement its `Protocol`s — the arrow points inward even though the runtime call goes
-  outward, and that inversion is the entire content of "dependencies point inward".
+  `application/` names `infrastructure` in an import, and no module under `entrypoints/` does
+  either unless it is a `main.py`.** `infrastructure/` imports `application/` in order to
+  implement its `Protocol`s — the arrow points inward even though the runtime call goes outward,
+  and that inversion is the entire content of "dependencies point inward".
 
   *What framework-free means here, concretely:* `domain/` and `application/` import
   `dataclasses`, `enum`, `datetime`, `uuid`, `typing` — and not `pydantic`, `sqlalchemy`,
@@ -710,11 +710,17 @@ and Part 4 of `03-roadmap.md`).
   operation reaches for a time module), so `domain/` declares no ports at all and depends on
   nothing.
 
-  *Composition root:* `entrypoints/api/main.py` and `entrypoints/worker/main.py` are the only
-  modules permitted to import `infrastructure/`. They construct the adapters and hand them to
-  the use cases; `routers/` and `consumer.py` receive them already built. Inside `api/`,
-  `deps.py` is the injection seam and `errors.py` holds the domain-error → HTTP-status table as
-  one registered handler, so 5.2's mapping is written once rather than per route.
+  *Composition root:* a `main.py` under `entrypoints/` is the only kind of module permitted to
+  import `infrastructure/` — `api/`, `worker/` and 4.6's one-shot `schema/`. They construct the
+  adapters and hand them to the use cases; `routers/` and `consumer.py` receive them already built.
+  Inside `api/`, `deps.py` is the injection seam and `errors.py` holds the domain-error →
+  HTTP-status table as one registered handler, so 5.2's mapping is written once rather than per
+  route.
+  *Corrected on 2026-08-14:* this paragraph and the rule above both counted **two** composition
+  roots, which was true when this item was written and stopped being true when 4.6 added the schema
+  service — the tree above already listed it, and 4.6 restated the rule correctly as "`main.py`
+  files only" without amending it here. Neither sentence carries a count now, so a fourth entry
+  point cannot make them stale again. The shape has never changed. Found at U8's gate.
 
   *Rejected:* **one `core/` directory** holding entities, rules, ports and use cases — the same
   files, one directory fewer, and at this size it would work; the honest reason to decline is
@@ -2328,6 +2334,38 @@ and Part 4 of `03-roadmap.md`).
   That makes `db/ → broker/` an edge inside layer 3, which 3.1's checkable rule does not cover and
   no lint catches; it is written here so that it is not later read as drift.
 
+  *Challenged at U8's gate on 2026-08-14, and the placement stands. Recorded in full because both
+  halves of the challenge are correct and the question will be asked again.* It was two questions:
+  why does 8.4's `deserialize_or_none` exist at all, and does this module belong in `application/`,
+  since it imports no broker library.
+  **The wrapper is not an independent design choice — it exists only because of this placement.**
+  The consumer has to tell an undecodable message from every other failure, because 8.4 gives the
+  two opposite dispositions: ack and drop, against reject into 8.2's cycle. To tell them apart it
+  must either name `SerializationError` or receive the distinction as a value, and 3.1 leaves it
+  unable to name one. Hence a value. Were this module reachable from `entrypoints/`, the wrapper
+  would not be written.
+  **And the module would pass for core code on the usual test.** It imports `json`, `datetime`,
+  `uuid` and `application/events.py` and nothing else, so 3.1's own question — can `domain/` and
+  `application/` run with nothing installed but Python — does not discriminate here. The "one
+  format, two sides" argument above is also true of `serialize`, which the publisher and the outbox
+  share, and not of `deserialize`, whose only reader is the consumer.
+  *What keeps it here is a different test: what changes when it changes.* A version envelope, a move
+  to a binary encoding, a renamed key — each is an adapter edit today, and each would become an edit
+  inside `application/` made because a broker's wire format changed. `EventPublisher.publish(event)`
+  is the port and the encoding is the adapter's answer to *as what bytes*; moving the codec inward
+  deletes that line. This item already refused the same move from the other direction when it
+  rejected `OutboxStore.add` taking pre-serialized bytes.
+  *The cost, stated rather than absorbed:* three artifacts exist to cross one boundary — the
+  wrapper, a constructor parameter on the consumer, and one injection in the worker's root. The rule
+  that produces them is written at **directory** granularity, so it catches a pure function over a
+  format, which is not the driven adapter it was aimed at. That granularity is kept for
+  enforceability alone: 3.1 rejected a single `core/` directory on exactly this ground — inside one
+  directory a crossed boundary shows as nothing in a diff and no lint sees it.
+  *Rejected:* **moving the module to `application/`** — above; it also reopens 8.4, which names the
+  wrapper, its signature and its injection. **Moving it to `infrastructure/serialization.py`**, this
+  item's own *Revisit if* target — it answers a different question and leaves the wrapper exactly
+  where it is.
+
   *The same function produces both copies*, the wire message and the stored `payload`. That is the
   whole point of the outbox row: it is evidence of what was meant to go out, and two functions
   producing approximately the same thing would make it a guess. The database adapter writes
@@ -2781,9 +2819,10 @@ and Part 4 of `03-roadmap.md`).
   *Left open deliberately:* every log line's shape here, truncation included, is **8.7**. The
   connection loop around the callback is **8.8**.
   *Source:* R10, DoD. *Constrained by:* 3.1, 7.3, 7.4, 7.7, 8.1, 8.2, 8.3, 8.5.
-  *Realised in:* U6 — the wrapper is part of 7.3's module and lands with the pair it joins, which
-  is where its neighbour `deserialize` also waits for U8's consumer. U8 realises everything else
-  in this record.
+  *Realised in:* U8. *Corrected on 2026-08-14:* this line read U6, which had already merged in
+  pull request #11 when this record closed in #13 — so the wrapper was assigned to a unit that had
+  shipped, and it exists on no branch. It still sits beside `deserialize` in 7.3's module, for the
+  reason this record gives; only the unit that writes it changes.
 
 - **8.5 Consumer concurrency.** `[decided]`
   *Decision:* **one worker replica in compose, prefetch 1.** This is a deployment choice, not
