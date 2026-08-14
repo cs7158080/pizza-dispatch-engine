@@ -29,9 +29,9 @@ status markers, precisely so that this table cannot be contradicted.
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7 | 12.4, 12.5, 12.8–12.10 |
-| 13 — Documentation | 13.1, 13.5, 13.6 | 13.2, 13.3, 13.4 |
+| 13 — Documentation | 13.1, 13.2, 13.5, 13.6 | 13.3, 13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **94** | **17** |
+| **Total** | **95** | **16** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3790,6 +3790,36 @@ and Part 4 of `03-roadmap.md`).
   *Source:* R19, DoD *Documentation*, `CLAUDE.md` §5, §7. *Constrained by:* 1.1, 1.2, 1.4, 9.1,
   9.3, 9.6, 10.3, 11.4, 11.6–11.11, 12.2, 12.7, 12.9, 12.10, 13.6, 14.2. *Constrains:* 13.2,
   13.3, 13.4. *Narrows:* 14.5's README requirement. *Realised in:* U13.
+
+- **13.2 Sequence diagram format and location.** `[decided]`
+  *Decision:* **Mermaid, in a fenced ```mermaid block inside the README's *How it works*
+  section** (13.1). No separate file, no committed image.
+  *Why Mermaid and not an image:* `CLAUDE.md` §4 forbids generated artifacts, and nothing would
+  regenerate this one — a change to 5.1, 7.5 or 8.2 would leave the picture wrong and silent,
+  with no diff to catch it in review. *Not ASCII:* it renders anywhere, which is its whole
+  advantage, and the DoD asks for a **clear** diagram; seven participants and an asynchronous
+  retry loop drawn by hand have to be realigned on every edit, where a Mermaid edit is one line.
+
+  *Why the README, and not on the word "embedded".* The assignment says *"in your documentation"*
+  and *"embedded in documentation"* — **neither says README**, and a separate documentation file
+  would satisfy both. What the word does fix is that the diagram is carried rather than linked
+  to. The location rests on one fact instead: **14.1 delivers a public GitHub repository, which
+  renders the fence itself**, so on the surface a reviewer actually reads, the block is a picture
+  and not thirty-five lines — which is what removes R19's "concise" as an objection. That it is
+  also a separately graded deliverable, best found in the file opened first, is a second and
+  weaker reason: a reviewer holding a *System Design* row would follow a link.
+  *Accepted cost:* a reader outside GitHub sees diagram source. It is an ordered list of messages
+  between components, so it stays legible unrendered.
+
+  *Rejected:* **a separate document** — the cost it saves is only paid by a reader who is not on
+  the delivered surface. **Mermaid inline plus a rendered image beside it** — one diagram in two
+  places, which is 13.6's drift with a picture attached.
+  *Ruff does not touch it:* 2.8 excludes Markdown from the formatter's file scope.
+  *Corrected while deciding:* the inventory note added at this gate claimed "embedded" removed the
+  choice between the README and a file beside it. It does not; the note is narrowed and the
+  location is decided here on its own grounds.
+  *Source:* R17, DoD *System Design*. *Constrained by:* 1.2, 13.1, 14.1. *Constrains:* 13.3.
+  *Realised in:* U13.
 
 - **13.5 `docs/ai-log.md`.** `[decided]`
   *Decision:* **nothing to decide — the file already exists and defines itself.** It specifies

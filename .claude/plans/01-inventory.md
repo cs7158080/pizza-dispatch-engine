@@ -99,9 +99,10 @@ narrowed on the same reading. Its rows had been cited by name since 1.1 was writ
 ceiling test is stated in terms of them — but the table itself was never restated here, so the
 list every candidate was checked against lived outside the repository. Two qualifying words had
 been dropped with it, and both are load-bearing. R17's diagram must be **embedded in the
-documentation** — the assignment says so twice, "in your documentation" in the diagram section
-and "embedded in documentation" in the deliverables list — which makes it 13.2's input rather
-than a free choice between the README and a file beside it. R19's README must be **concise**,
+documentation** — the diagram section says "in your documentation" and the deliverables list
+says "embedded in documentation". **Neither says README**, so the word fixes that the diagram is
+*carried* rather than *linked to*, and leaves which document it sits in to 13.2. R19's README
+must be **concise**,
 which is a ceiling on 13.1 and not a matter of taste. Per this file's append-only rule neither
 requirement is rewritten; this note carries the narrowing.*
 
