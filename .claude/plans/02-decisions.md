@@ -29,9 +29,9 @@ status markers, precisely so that this table cannot be contradicted.
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
 | 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7 | 12.4, 12.5, 12.8–12.10 |
-| 13 — Documentation | 13.1, 13.2, 13.5, 13.6 | 13.3, 13.4 |
+| 13 — Documentation | 13.1, 13.2, 13.3, 13.5, 13.6 | 13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **95** | **16** |
+| **Total** | **96** | **15** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3820,6 +3820,25 @@ and Part 4 of `03-roadmap.md`).
   location is decided here on its own grounds.
   *Source:* R17, DoD *System Design*. *Constrained by:* 1.2, 13.1, 14.1. *Constrains:* 13.3.
   *Realised in:* U13.
+
+- **13.3 Diagram scope and count.** `[decided]`
+  *Decision:* **one diagram, five participants named after their Compose services** — `cli`,
+  `api`, `postgres`, `rabbitmq`, `worker` — covering 1.2's steps 3 to 12, which that item already
+  fixed as every path R17 names.
+  *Why one and not two:* the missing-driver path is not an alternative branch here. 1.2's steps 6
+  to 9 put it **on the main line** — `BAKING` with an empty pool, the reject, the registration,
+  the redelivery — so a second diagram would split a sequence that does not fork, and would repeat
+  the participants and the three steps before it in both.
+  *Why the Compose names:* a reviewer who reads `worker` in the diagram and types
+  `docker compose logs worker` gets the same word. 11.1 records that every one of those names is
+  already load-bearing somewhere else.
+  *Two things the diagram shows and one it does not.* The outbox insert appears as a single
+  message — `UPDATE orders + INSERT outbox`, one transaction — because 7.5's atomicity is the
+  design decision 13.4 explains in words, and one line makes it visible. 8.2's wait queue appears
+  as a note over `rabbitmq` rather than a sixth participant: a box costs a column down the whole
+  diagram for two arrows. Neither the `schema` one-shot nor the `tests` service appears — 11.1
+  lists them, and R17 asks for the request path.
+  *Source:* R17, DoD *System Design*. *Constrained by:* 1.2, 11.1, 13.2. *Realised in:* U13.
 
 - **13.5 `docs/ai-log.md`.** `[decided]`
   *Decision:* **nothing to decide — the file already exists and defines itself.** It specifies
