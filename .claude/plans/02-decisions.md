@@ -28,10 +28,10 @@ status markers, precisely so that this table cannot be contradicted.
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
-| 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
+| 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7 | 12.4, 12.5, 12.8–12.10 |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **91** | **20** |
+| **Total** | **93** | **18** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3661,6 +3661,77 @@ and Part 4 of `03-roadmap.md`).
   *Source:* `CLAUDE.md` §5. *Constrained by:* 6.5, 6.6, 11.6, 11.7. *Constrains:* 2.6, 12.1,
   12.2, 12.4, 12.5. *Feeds:* 13.4.
 
+- **12.6 Scope of the unit test set.** `[decided]`
+  *Decision:* **no amendment to `CLAUDE.md` §5 — the set stays inside "free", and the rule is
+  one of origin, not size.** A test belongs in `tests/unit/` when it runs with **no live
+  process and no test double**, and is written by the step that writes the code beneath it
+  (§8.2). Not "a business rule only": §5 grants its permission on dependency and cost,
+  nowhere on layer.
+
+  *Why the five non-`domain/` files on `main` are inside it.* §5 states a permission and a
+  purpose separately. `test_order.py` and `test_driver.py` serve the purpose — the core
+  proved testable in isolation; the other five are §8.2 met at zero cost, which the
+  permission admits alone. `test_env_example.py` reads a repository file, and §5 fixes its
+  own meaning of infrastructure in the next sentence — *"requires external services"*.
+
+  *Closed to accumulation, not to growth.* Nothing is added retrospectively to complete a
+  picture; a later unit writing pure logic writes its test under the same two conditions.
+
+  *What this leaves U4: nothing.* 5.7's free candidates are recorded *Realised in* U3, which
+  wrote all of them, and 12.7 is realised in U10 and U11 — so 5.7's *"U4 for whatever 12.6
+  opens beyond them"* resolves to nothing opened. Part 4's U4 row is a roadmap change and not
+  this item's.
+
+  *Rejected — amending §5 for a larger set:* the only target left is `application/` with
+  fakes, which 5.7 rejected and 12.2 covers over HTTP against the real thing; and a
+  project-wide rule needs more than one decision's justification (`docs/ai-log.md`,
+  2026-08-10). *— a bigger set "if time remains"*, the inventory's wording: remaining time is
+  not an admission criterion, and 1.5 left no budget to measure it against. *— no unit set at
+  all:* 5.7, unchanged. **Not rested on 1.1's ceiling test**, which would delete the set
+  whole — same log row.
+  *Source:* `CLAUDE.md` §5, R18. *Constrained by:* 5.7, 12.2, 12.3. *Answers:* Q16 in full,
+  completing A17. *Realised in:* U2, U3, U5, U6.
+
+- **12.7 Directory layout and separate run commands.** `[decided]`
+  *Decision:* **the two directories that already exist, two commands, and no pytest
+  configuration.** §5 asks for separate directories that can be run separately; both halves
+  hold today, so this item confirms a layout rather than choosing one.
+
+  | Path | Holds | Written by |
+  |---|---|---|
+  | `tests/unit/` | the free unit set (12.6), one file per module under test | U2, U3, U5, U6 |
+  | `tests/integration/` | the four scenarios of 12.2, one file | U10 |
+  | `tests/integration/waiting.py` | 12.4's `wait_until` and `stays`, and their three constants | U10 |
+  | `tests/integration/conftest.py` | 12.5's absorbing fixture | U10 |
+
+  Both directories are packages with `__init__.py`; there is no `tests/__init__.py` above them.
+
+  | Command | Runs | In 14.7's list from |
+  |---|---|---|
+  | `pytest tests/unit` | the unit set | U2 |
+  | `pytest tests/integration` | the four scenarios | U11 |
+
+  *Why the helpers sit beside the suite and not in a shared directory:* the unit set imports
+  nothing from them, so `tests/helpers/` would be an abstraction with one consumer. *Why
+  `waiting.py` and not `conftest.py` for both:* the two helpers are called by name, and
+  `conftest.py` is the file pytest loads for what is **not** named — the fixture. Splitting
+  them puts each in the mechanism it actually uses.
+
+  *No `[tool.pytest.ini_options]`, closing the deferral U1 through U5 each filed here.* Its
+  only candidate content is `testpaths`, which applies to a bare `pytest` — and both commands
+  above name a path, so it would never take effect. It would not move the cache either:
+  11.9 copies `pyproject.toml` to `/app`, so `rootdir` is `/app` with or without the section,
+  which is the fact 11.9's `chown app:app /app` already rests on.
+
+  *What this fixes for the compose test service, and what it leaves open:* the path is
+  `tests/integration` and nothing else. Flags, the PASS/FAIL summary and any report file are
+  12.9's, which 11.9 left to U11; whether lint and type checks join that run is 12.10's.
+  *Accepted cost:* 11.9 copies `tests/` whole, so `pizza-test` carries the unit set nobody
+  runs there. §5 requires the categories to be **runnable** separately, not shipped separately.
+  *Source:* `CLAUDE.md` §5. *Constrained by:* 11.9, 12.3, 12.4, 12.5, 14.7. *Constrains:* 12.9.
+  *Realised in:* U10 for the two modules, U11 for the command 14.7 gains — the directories
+  themselves have been on `main` since U1.
+
 
 ## Topic 13 — Documentation and deliverables
 
@@ -3881,7 +3952,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A14** † | `GET /orders` exists — light list, newest first, no cap and no paging | 6.6 |
 | **A15** † | `GET /health` exists — `200` when the database is reachable, `503` otherwise | 6.6, 7.5 |
 | **A16** | The mock dispatch notification is one structured `INFO` log line, and not a test assertion target | 8.6 |
-| **A17** † | "3–4 automated tests" means four integration scenarios; unit tests are separate and uncounted | 12.6 *(partial)* |
+| **A17** † | "3–4 automated tests" means four integration scenarios; unit tests are separate and uncounted | 12.6 |
 | **A18** | The CLI covers status updates as well as the three operations R11 names | 9.2 |
 | **A19** † | The environment is disposable — no named volumes, `docker compose down` is the reset | 11.7 |
 | **A20** † | No authentication or authorisation | 6.8, FW9 |
