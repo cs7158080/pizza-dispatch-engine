@@ -96,3 +96,18 @@ services:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
+
+  # Not started by `up`: an interactive prompt loop with no terminal reads EOF and exits.
+  # Reached with `docker compose run --rm cli`, which attaches one.
+  cli:
+    build:
+      context: .
+      target: runtime
+    image: pizza-runtime
+    command: ["python", "-m", "pizza.entrypoints.cli.main"]
+    profiles: ["cli"]
+    environment:
+      PIZZA_API_BASE_URL: ${PIZZA_API_BASE_URL:-http://api:8000}
+    depends_on:
+      api:
+        condition: service_healthy
