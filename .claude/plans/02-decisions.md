@@ -2917,9 +2917,26 @@ and Part 4 of `03-roadmap.md`).
 
   `WARNING` rather than `INFO` for the no-driver rejection, because those are the lines a reviewer
   is meant to watch: 1.2's steps 7 and 8 are 64 seconds of that cycle, and they should not read as
-  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output,
-  and no per-library level is curated, since a filtered module list is configuration with no
-  reader.
+  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output.
+
+  **One per-library level is curated, and this record originally refused to curate any.** The ground
+  was that a filtered module list is *"configuration with no reader"*. That claim did not survive
+  the environment being driven by hand at U9. `pika` narrates at `INFO`, and the api holds a
+  long-lived publisher connection whose heartbeats nothing services between requests (7.7's stated
+  asymmetry with the worker) — so RabbitMQ closes it after 60 s of idle, and the next `PATCH` finds
+  a reset socket. 7.5's single reconnect then does its job in about 40 ms and loses nothing, but it
+  prints roughly twenty-five lines and two tracebacks on the way. 1.2's demo path is thirteen steps
+  a person types, so an idle minute is certain and a reviewer meets that wall in the stream steps 6,
+  8 and 10 send them to watch. **The reader the original argument said did not exist is the reviewer
+  1.2 is built around.**
+  `logging.getLogger("pika").setLevel(logging.WARNING)`, in `configure_logging` beside the format —
+  one line, and the list stays at one entry. **`WARNING` and not `CRITICAL`:** `pika`'s own `ERROR`
+  records survive, so a broker that is genuinely unreachable still prints before 8.8's exit.
+  *Rejected — `heartbeat=0` on the publisher's `URLParameters`,* which would stop the disconnect
+  rather than the narration of it: it reopens 7.7 and leaves a genuinely dead connection undetected
+  until the next publish. *Rejected — leaving it and describing the wall in the README:* it explains
+  a red block instead of removing one, in the one stream 11.1's `attach: false` exists to keep
+  clean.
   *`at=` is not a duplicate of `asctime`:* it is when the assignment happened, taken from the
   `Clock` and written to the database, against when the line was emitted.
 

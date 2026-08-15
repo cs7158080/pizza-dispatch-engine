@@ -83,6 +83,7 @@ Each line names the item that owns it, so nothing here is silence.
 | 3 | step | `feat: launch the api and the dispatch worker` |
 | 4 | step | `feat: define the cli service, reachable but never started by up` |
 | C | amendment | `fix: say when a repeated dispatch event changed nothing` |
+| D | amendment | `fix: stop pika narrating a successful reconnect at INFO` |
 
 ## 4. The Definition of Done that applies to every step
 
