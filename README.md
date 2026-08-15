@@ -1,6 +1,33 @@
 # pizza-dispatch-engine
 Event-driven pizza order and delivery dispatch system built with REST API, message broker, worker service, and database.
 
+## Running the system
+
+Requires Docker with the Compose v2 plugin, version 2.24 or later — check with
+`docker compose version`.
+
+```
+docker compose up
+```
+
+That builds the image on the first run, then starts PostgreSQL, RabbitMQ, a one-shot
+service that creates the database schema, the API, and the dispatch worker. It needs no
+setup and no `.env` file: every value has a working default.
+
+The database and the broker are deliberately kept out of this stream, so what you see is
+the API and the worker. Their logs are still collected — `docker compose logs postgres`.
+
+The API is published on the host at **http://localhost:8000**:
+
+- `GET /health` — `200` while the database is reachable, `503` otherwise
+- `/docs` — the generated OpenAPI document, which is the contract in full
+
+If port 8000 is already taken, copy `.env.example` to `.env` and set `API_HOST_PORT` to
+something else. Nothing inside the environment changes; only the host side moves.
+
+After changing source, rebuild with `docker compose up --build`. To stop and reset,
+`docker compose down` — see *Persistence* below for what that discards.
+
 ## Local development
 
 The system runs under Docker Compose; this section is only for working on the source.
