@@ -3463,6 +3463,16 @@ and Part 4 of `03-roadmap.md`).
   answers the question the dependent service is actually asking. The user and database come from the
   container's own environment (10.1), so a reviewer who overrides them does not break the check;
   `$$` is Compose's escape for a literal `$`.
+  *Measured at U9, and the hazard is smaller than the paragraph above implies.* The temporary
+  server's whole life is about **160 ms** — it begins listening 1.3 s after the container starts and
+  is shut down 0.2 s later — while Docker fires the first probe one `interval` after container
+  start, at **5 s**. Removing `-h` and starting cold therefore does *not* reproduce the failure: the
+  check never meets the temporary server. What the removal did confirm is the mechanism, from
+  `pg_isready`'s own output — `/var/run/postgresql:5432` without the flag against `127.0.0.1:5432`
+  with it. **The flag stays**, because the window is real and closing it costs thirteen characters.
+  **What the numbers are recorded for is the `interval`:** the protection today is the flag *and* a
+  probe cadence thirty times the window, so lowering `interval` toward 1 s walks the first probe
+  into the hazard — which is not the sampling-rate change it looks like.
   *Why the API's check is a `python -c` and not `curl`:* the base is `python:3.x-slim` (3.7), which
   ships no `curl`. The alternative is a package in the image every service ships, added for a
   diagnostic — against one line using the interpreter that is already the reason the image exists.
