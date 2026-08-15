@@ -1,0 +1,52 @@
+# No named volumes: postgres and rabbitmq write to their own container filesystems, so
+# `docker compose down` leaves nothing behind and the next `up` starts empty. The lines
+# that make the data survive are in README.md, under "Persistence".
+
+services:
+  postgres:
+    image: postgres:16
+    attach: false
+    restart: on-failure
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pizza}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pizza}
+      POSTGRES_DB: ${POSTGRES_DB:-pizza}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3.13
+    attach: false
+    restart: on-failure
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-pizza}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-pizza}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  schema:
+    build:
+      context: .
+      target: runtime
+    image: pizza-runtime
+    command: ["python", "-m", "pizza.entrypoints.schema.main"]
+    # Reads database_url alone; the rest are required by ServiceSettings, which every
+    # service loading it must satisfy in full.
+    environment:
+      PIZZA_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pizza}:${POSTGRES_PASSWORD:-pizza}@postgres:5432/${POSTGRES_DB:-pizza}
+      PIZZA_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-pizza}:${RABBITMQ_DEFAULT_PASS:-pizza}@rabbitmq:5672/
+      PIZZA_LOG_LEVEL: ${PIZZA_LOG_LEVEL:-INFO}
+      PIZZA_BROKER_PUBLISH_TIMEOUT_SECONDS: ${PIZZA_BROKER_PUBLISH_TIMEOUT_SECONDS:-5}
+      PIZZA_DISPATCH_RETRY_DELAY_SECONDS: ${PIZZA_DISPATCH_RETRY_DELAY_SECONDS:-8}
+      PIZZA_DISPATCH_MAX_RETRIES: ${PIZZA_DISPATCH_MAX_RETRIES:-8}
+    depends_on:
+      postgres:
+        condition: service_healthy

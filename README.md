@@ -52,3 +52,32 @@ they are documented there rather than set there.
 The credentials are local development defaults for an environment that `docker compose down`
 destroys. They are not secrets, and a real deployment would supply its own from the
 environment.
+
+## Persistence
+
+There are no named volumes. PostgreSQL and RabbitMQ write to their own container
+filesystems, so `docker compose down` deletes the data along with the containers and the
+next `docker compose up` starts from empty. Stopping with `Ctrl-C` keeps everything: the
+containers still exist, and only `down` removes them.
+
+That is deliberate. Every launch starts from a known state — no orders, no drivers — which
+is what makes a run reproducible, and `docker compose down` is the whole reset.
+
+To keep the data instead, add to `docker-compose.yml`:
+
+```yaml
+services:
+  postgres:
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+  rabbitmq:
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+```
+
+The reset then becomes `docker compose down -v`, because data in a named volume outlives
+the containers.
