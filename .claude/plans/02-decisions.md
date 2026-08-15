@@ -3715,7 +3715,7 @@ and Part 4 of `03-roadmap.md`).
   # The package itself; its dependencies are already installed and pinned above.
   COPY pyproject.toml .
   COPY src/ ./src/
-  RUN pip install --no-cache-dir --no-deps .
+  RUN pip install --no-cache-dir --no-deps . && rm -rf build
 
   USER app
   CMD ["uvicorn", "pizza.entrypoints.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -3743,6 +3743,16 @@ and Part 4 of `03-roadmap.md`).
   `ruff` and `mypy` in the image the API runs, which is the one thing 3.7 split the stages to
   prevent. *Rejected — `pip install --user`:* `app` is a system account with no home, and it would
   split the install across two locations.
+
+  *Why `rm -rf build`, which 2.9's sketch does not have.* `pip install .` builds in place, and
+  setuptools leaves its intermediate tree at `/app/build/lib/pizza/` — every module a second time,
+  in an image built on 3.3's premise that the installed distribution in `site-packages` is the only
+  copy that runs. It is deleted in the layer that creates it, so it costs no layer and no build time.
+  **Measured rather than argued:** with the tree present, `ruff check .` inside `pizza-test` reports
+  35 `TID251` violations, because the per-file ignores are keyed to `src/pizza/infrastructure/*`
+  while the copy sits at `build/lib/pizza/infrastructure/*`. That is one of the two commands 12.10
+  offers a reviewer; **the removal is decided on the stray copy and not on that command**, which
+  13.4 may or may not document.
 
   *Why `/app` is owned by `app`, folded into the `adduser` layer rather than given a `chown` of its
   own.* `pytest` writes its cache into the rootdir, which is `/app` itself and not the `tests/`
