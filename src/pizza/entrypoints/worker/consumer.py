@@ -113,6 +113,7 @@ class DispatchConsumer:
             return True
 
         if result.outcome is DispatchOutcome.NOTHING_TO_DO:
+            logger.info("event=nothing_to_do order_id=%s", event.order_id)
             return True
 
         if rejections >= self._max_retries:

@@ -2895,12 +2895,25 @@ and Part 4 of `03-roadmap.md`).
   |---|---|---|
   | `event=worker_ready` | `INFO` | 8.8 |
   | `event=dispatch_notification order_id driver_id driver_name at` | `INFO` | 8.6 |
+  | `event=nothing_to_do order_id` | `INFO` | 5.5's idempotence |
   | `event=no_driver_available order_id attempt` | `WARNING` | 8.2's cycle |
   | `event=dispatch_failed order_id` | `ERROR` | 8.3 |
   | `event=poison_message body` | `ERROR` | 8.4 |
   | `event=order_not_found order_id` | `ERROR` | 8.4 |
   | `event=dispatch_error order_id`, with the traceback | `ERROR` | 8.4 |
   | `event=broker_unreachable` · `event=broker_connection_lost` | `ERROR` | 8.8 |
+
+  **`event=nothing_to_do` was added at U9, after driving the environment by hand.** This table
+  originally left the idempotent path silent, and 1.2's step 10 promises the opposite — it carries
+  the `T1:` prefix that sends a reviewer to watch terminal 1, exactly as steps 6 and 8 do, for the
+  second publish that *"worker acks, changes nothing"*. With no line there is nothing to watch, and
+  a reviewer following the demo path cannot tell a correctly ignored event from a lost one. The two
+  records had disagreed since the table closed. `INFO` rather than `WARNING`, because unlike the
+  no-driver cycle this is a correct and final outcome, which is 8.6's level.
+  *Named `nothing_to_do` and not `already_assigned`:* the outcome comes from
+  `not order.can_be_assigned()`, which covers an order already delivered as well as one already
+  assigned, so the narrower name would be false on the terminal path. Mapping the line 1:1 onto
+  `DispatchOutcome` is also what keeps the two from drifting.
 
   `WARNING` rather than `INFO` for the no-driver rejection, because those are the lines a reviewer
   is meant to watch: 1.2's steps 7 and 8 are 64 seconds of that cycle, and they should not read as
@@ -2930,8 +2943,9 @@ and Part 4 of `03-roadmap.md`).
 
   *Roadmap consequence, recorded rather than assumed:* U7 builds `pizza/log.py` because it is the
   first entrypoint, so `8.7` joins U7's *Decided by* cell in Part 4.
-  *Source:* R8, R9, DoD. *Constrained by:* 2.6, 7.2, 8.4, 8.6, 8.8, 10.4.
-  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines).
+  *Source:* R8, R9, DoD. *Constrained by:* 1.2, 2.6, 5.5, 7.2, 8.4, 8.6, 8.8, 10.4.
+  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines), U9 (the
+  ninth line, and the reason it was missing).
 
 - **8.8 Startup and shutdown behaviour.** `[decided]`
   *Decision:* **the worker retries nothing itself, and handles no signal.** It exits on a broker it

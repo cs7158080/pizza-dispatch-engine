@@ -82,6 +82,7 @@ Each line names the item that owns it, so nothing here is silence.
 | 2 | step | `feat: bring up the database, the broker, and the schema they hold` |
 | 3 | step | `feat: launch the api and the dispatch worker` |
 | 4 | step | `feat: define the cli service, reachable but never started by up` |
+| C | amendment | `fix: say when a repeated dispatch event changed nothing` |
 
 ## 4. The Definition of Done that applies to every step
 
