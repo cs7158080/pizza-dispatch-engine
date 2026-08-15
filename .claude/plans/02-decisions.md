@@ -3165,9 +3165,11 @@ and Part 4 of `03-roadmap.md`).
   *Why it is not started by `up`:* the api and the worker are daemons and nothing types at them;
   the CLI is an interactive foreground program whose whole body is a prompt loop. A service
   without `profiles` starts at `up` with no terminal attached, reads EOF from stdin at its first
-  prompt, and exits — printing a failed container into the very stream 11.3 puts the PASS/FAIL
+  prompt, and exits — printing an exited container into the very stream 11.3 puts the PASS/FAIL
   summary in. `profiles` is two words meaning "not at `up`"; in every other respect the service
   is defined exactly as the api and the worker are.
+  *Corrected on 2026-08-16:* this sentence read "a failed container". 9.1 makes `EOF` exit `0`,
+  so the container exits successfully — the noise argument and the decision are unchanged.
 
   *Checked against the brief, because the wording is close:* R14 asks for one
   `docker-compose.yml` launching **API, worker, broker, and database** — the CLI is not on that
@@ -3232,10 +3234,8 @@ and Part 4 of `03-roadmap.md`).
   clears the ten with room for connection and response, one value for every call rather than one per
   endpoint, **and not an environment variable** — 10.1 requires a record and the `PIZZA_` prefix for
   a new one, and a number derived from another number is not a knob.
-  *Noted, not edited:* 10.4's *"Nothing has asked to change it"* is now stale. The sentence belongs
-  to a decided item in a merged topic and is left for the developer.
   *Source:* R11, `CLAUDE.md` §3. *Constrained by:* 1.1, 4.2, 6.2, 6.3, 9.1, 9.3, 10.1, 10.4.
-  *Realised in:* U12.
+  *Amends:* 10.4's fixed-values row. *Realised in:* U12.
 
 - **9.5 Client-side state.** `[decided]`
   *Decision:* **one thing is remembered — the selected order's id — in memory, for the life of the
@@ -3482,7 +3482,7 @@ and Part 4 of `03-roadmap.md`).
   | `prefetch = 1` | 8.5 decided it with a full rationale, and FW7 records that a wider window becomes actively harmful the moment there is more than one consumer. An environment knob invites exactly that setting |
   | SQLAlchemy pool sizing | 2.5 left "whether it becomes tunable" to this item. It does not: the library defaults stand, and `pool_pre_ping=True` is code, not configuration |
   | the API's internal port, `8000` | a constant in the image's command. Publishing a host port is 11.8, which may add a Compose-only variable that our code never reads |
-  | `httpx`'s client timeout | the library's own 5 s default (2.6). Nothing has asked to change it |
+  | `httpx`'s client timeout | fixed by 9.4, which sets it explicitly and derives the number. Not tunable: a value derived from another value is not a knob |
   | exchange, queue and routing-key names | 7.1 — constants. They do not differ between environments, so they are not configuration |
 
   *Source:* R16, `CLAUDE.md` §5. *Constrained by:* 1.2, 2.5, 2.6, 7.5, 8.2, 8.3, 8.5.
