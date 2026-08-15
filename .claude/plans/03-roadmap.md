@@ -307,3 +307,23 @@ recorded.
   *What would trigger it:* taking FW12, which closes it as a side effect; or a broker that stops
   being a container on the same Compose host, at which point a connection that establishes and then
   stops answering is no longer exotic.
+
+- **FW18 — A single `advance` action in the CLI.** The fourth menu action (9.2) becomes one
+  keystroke that moves the selected order to the next status, instead of a choice among the five
+  values.
+  *Why it is not in scope, and the reason is a fork rather than a cost:* the action needs somebody
+  to know which status follows which, and there are exactly two places that knowledge can come from.
+  **The client computes it** — 3.6 rejects this by name, because 5.1's sequence would then execute
+  inside an adapter and the rule would exist in two components. **The API publishes it** — a
+  `next_status` field on `OrderResponse`, which is a change to 6.1's nine keys with topic 6 closed.
+  Neither is available to U12's gate; the second is the one worth taking.
+  *What it would still not remove:* the five values stay selectable under either route, because
+  5.2's `409` has to be reachable from the interface a reviewer is handed (1.2, step 11). `advance`
+  is therefore an **additional** action rather than a replacement — it buys one keystroke on the
+  legal path and does not make the menu smaller.
+  *What 9.2 shipped instead:* the chain drawn with the current position marked. It carries the same
+  information to the reader, it is display rather than a decision, and it needs no change to a
+  closed contract.
+  *Cost when taken:* by the second route, one field derived from the table 5.1 already owns plus the
+  CLI reading it, and the rule stays in one place. By the first, one expression — and the rule in
+  two.
