@@ -19,19 +19,19 @@ status markers, precisely so that this table cannot be contradicted.
 |---|---|---|
 | 1 — Scope and time | 1.1, 1.2, 1.3, 1.4, 1.5 | — |
 | 2 — Stack and tooling | 2.1–2.10 | — |
-| 3 — Architecture and layering | 3.1–3.8 | — |
+| 3 — Architecture and layering | 3.1–3.9 | — |
 | 4 — Data model | 4.1–4.9 | — |
 | 5 — Business rules | 5.1–5.8 | — |
-| 6 — API contract | 6.4, 6.5, 6.6, 6.8 | 6.1, 6.2, 6.3, 6.7, 6.9 |
+| 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
-| 8 — Worker | 8.1, 8.2, 8.3, 8.5, 8.6, 8.9 | 8.4, 8.7, 8.8 |
+| 8 — Worker | 8.1–8.9 | — |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.1–11.11 | — |
-| 12 — Testing | 12.1, 12.2, 12.3 | 12.4–12.10 *(12.6 partial)* |
+| 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.5, 12.8 |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **88** | **22** |
+| **Total** | **101** | **10** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -89,8 +89,8 @@ and Part 4 of `03-roadmap.md`).
   |---|---|---|---|
   | 1 | 1 | `docker compose up` | stack starts, suite runs, PASS/FAIL summary (11.3) |
   | 2 | 2 | `docker compose run --rm cli` | the menu (9.3) |
-  | 3 | 2 | place an order | `RECEIVED`, `assignment_state: PENDING` |
-  | 4 | 2 | list orders, select by customer name | R11 without retyping a UUID (A14) |
+  | 3 | 2 | place an order | `201` and the new order's id (6.1); its status is read at step 4 |
+  | 4 | 2 | list orders, select by customer name | `RECEIVED`, `assignment_state: PENDING`; R11 without retyping a UUID (A14) |
   | 5 | 2 | advance to `PREPARING` | `200` |
   | 6 | 2 | advance to `BAKING` | publish (5.3); **T1:** worker warns "no driver", rejects to the wait queue (8.1, 8.2) |
   | 7 | 2 | register a driver | `AVAILABLE` (6.4) |
@@ -686,10 +686,10 @@ and Part 4 of `03-roadmap.md`).
   ```
 
   *The rule, written so it can be checked in a diff:* **no module under `domain/` or
-  `application/` names `infrastructure` in an import, and outside the two `main.py` files no
-  module under `entrypoints/` does either.** `infrastructure/` imports `application/` in order
-  to implement its `Protocol`s — the arrow points inward even though the runtime call goes
-  outward, and that inversion is the entire content of "dependencies point inward".
+  `application/` names `infrastructure` in an import, and no module under `entrypoints/` does
+  either unless it is a `main.py`.** `infrastructure/` imports `application/` in order to
+  implement its `Protocol`s — the arrow points inward even though the runtime call goes outward,
+  and that inversion is the entire content of "dependencies point inward".
 
   *What framework-free means here, concretely:* `domain/` and `application/` import
   `dataclasses`, `enum`, `datetime`, `uuid`, `typing` — and not `pydantic`, `sqlalchemy`,
@@ -710,11 +710,17 @@ and Part 4 of `03-roadmap.md`).
   operation reaches for a time module), so `domain/` declares no ports at all and depends on
   nothing.
 
-  *Composition root:* `entrypoints/api/main.py` and `entrypoints/worker/main.py` are the only
-  modules permitted to import `infrastructure/`. They construct the adapters and hand them to
-  the use cases; `routers/` and `consumer.py` receive them already built. Inside `api/`,
-  `deps.py` is the injection seam and `errors.py` holds the domain-error → HTTP-status table as
-  one registered handler, so 5.2's mapping is written once rather than per route.
+  *Composition root:* a `main.py` under `entrypoints/` is the only kind of module permitted to
+  import `infrastructure/` — `api/`, `worker/` and 4.6's one-shot `schema/`. They construct the
+  adapters and hand them to the use cases; `routers/` and `consumer.py` receive them already built.
+  Inside `api/`, `deps.py` is the injection seam and `errors.py` holds the domain-error →
+  HTTP-status table as one registered handler, so 5.2's mapping is written once rather than per
+  route.
+  *Corrected on 2026-08-14:* this paragraph and the rule above both counted **two** composition
+  roots, which was true when this item was written and stopped being true when 4.6 added the schema
+  service — the tree above already listed it, and 4.6 restated the rule correctly as "`main.py`
+  files only" without amending it here. Neither sentence carries a count now, so a fourth entry
+  point cannot make them stale again. The shape has never changed. Found at U8's gate.
 
   *Rejected:* **one `core/` directory** holding entities, rules, ports and use cases — the same
   files, one directory fewer, and at this size it would work; the honest reason to decline is
@@ -875,6 +881,7 @@ and Part 4 of `03-roadmap.md`).
   class OrderRepository(Protocol):
       def add(self, order: Order) -> None: ...       # returns nothing — 4.7
       def get(self, order_id: UUID) -> Order | None: ...
+      def get_for_update(self, order_id: UUID) -> Order | None: ...   # 6.9 — write paths only
       def save(self, order: Order) -> None: ...
       def list_all(self) -> list[Order]: ...         # newest first; docstring carries it
 
@@ -947,8 +954,14 @@ and Part 4 of `03-roadmap.md`).
   and saves in the same transaction (8.9). **No lifecycle on `EventPublisher`** — the composition
   root holds the concrete adapter (3.1) — which *constrains* 7.7 rather than waiting on it.
 
+  *Amended by 6.9 on 2026-08-11:* `OrderRepository` gains `get_for_update`, taking a row lock for the
+  status-update path. It is a second method rather than a flag on `get`, so that the read paths above
+  cannot acquire a lock by accident.
+  *Amended by 3.9 on 2026-08-13:* `UnitOfWork.commit()` declares `TransactionFailed`. It was the one
+  port method here that can fail from the outside and named no error, against this module's own rule
+  that a port error sits above the port that raises it.
   *Source:* `CLAUDE.md` §3 ("explicit typed boundaries"), §2 Phase 3. *Constrained by:* 2.4, 2.5,
-  3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
+  3.1, 3.2, 3.5, 4.7, 4.8, 5.4, 6.5, 6.6, 6.9, 7.5, 7.6, 8.9. *Constrains:* 7.7. *Corrects:* U3/U6,
   2.5's "a port of its own", 4.7's sample line. *Realised in:* U3.
 
 - **3.5 Transaction ownership.** `[decided]`
@@ -1095,9 +1108,9 @@ and Part 4 of `03-roadmap.md`).
   *The build steps this item owns*, per the inventory's "shapes the build steps": dependency
   layer before source so the cache survives a source edit; a `.dockerignore`; a pinned `slim`
   base; a non-root `USER`; and **exec-form `CMD`**, which is not cosmetic here — shell form puts
-  a shell at PID 1 and the signal never reaches the process, so whatever 8.8 decides about
-  shutting down without losing an in-flight message would be unimplementable. This item supplies
-  the precondition; 8.8 still owns the behaviour.
+  a shell at PID 1 and the signal never reaches the process, so `uvicorn` cannot finish its
+  in-flight HTTP requests and every container is force-killed at the end of the grace period on
+  each stop. 8.8 records the same requirement from the worker's side.
 
   *What FW2 costs, closing 7.5's question through 3.3:* the relay is `entrypoints/relay/main.py`
   plus a compose entry running the `runtime` image with a different command. **No new image, no
@@ -1123,6 +1136,40 @@ and Part 4 of `03-roadmap.md`).
   §3's "every entry point uses the same core" is satisfied by the structure rather than by a
   choice made here.
   *Source:* `CLAUDE.md` §3, R20. *Constrained by:* 3.1, 3.3, 3.5.
+
+- **3.9 What `UnitOfWork.commit()` may raise.** `[decided]`
+  *Decision:* the port declares **`TransactionFailed`**, defined in `application/ports.py` above
+  `UnitOfWork` by the rule that module already states. `SqlAlchemyUnitOfWork.commit()` translates
+  `SQLAlchemyError` into it and nothing else. `AdvanceOrderStatus` catches it beside
+  `OutboxWriteFailed` at the outbox mark, and nowhere else.
+
+  *What it repairs.* `mark_published` sets `published_at` and lets the `UPDATE` leave with the
+  transaction, because 2.5 turned autoflush off. So `except OutboxWriteFailed` guards the `SELECT`
+  and the missing row and never the write the method is named for, and a reader takes that write
+  as guarded. With the type, the catch covers what it claims.
+
+  *The window is narrow, and it is not the argument.* The `SELECT` one line earlier proves the
+  connection live, so the fault has to land between two adjacent statements — the window already
+  accepted when a `flush()` inside `mark_published` was rejected on 2026-08-12. What decides this
+  item is that the catch names an error its own operation cannot raise, and that `publish` and
+  `mark_published` declare their failures while `commit()` did not.
+
+  *Where it stops — `__exit__` is not translated.* Its `rollback()` runs during unwinding, so an
+  error raised there would replace the exception already in flight and lose the cause; and no
+  caller would act on it differently. `commit()` is called deliberately and its result can be
+  acted on, which is what earns it a declared error and leaves `__exit__` without one.
+
+  *No behavioural change at the first commit.* A failure there means the write did not happen, and
+  6.2 admits no deliberate `5xx`, so it reaches the entry point's `Exception` handler and returns
+  6.3's body with `500` — the same outcome as an untyped error, without SQLAlchemy crossing a layer.
+
+  *Rejected:* **leaving `commit()` untyped** with a comment naming what the catch omits — zero
+  code, but it documents a misleading catch instead of removing it; **`except Exception` at the
+  mark** — `CLAUDE.md` §6, and the same argument already settled at U3's step 5; **`flush()` inside
+  `mark_published`** — rejected on 2026-08-12, and it answers one call site rather than the
+  contract.
+  *Source:* 3.4's and 3.5's silence, recorded at U5's step 7. *Constrained by:* 2.5, 3.1, 6.2, 7.5.
+  *Amends:* 3.4's port surface. *Realised in:* U7.
 
 
 ## Topic 4 — Data model
@@ -1438,7 +1485,7 @@ and Part 4 of `03-roadmap.md`).
   with self._uow as uow:
       uow.orders.add(order)                # add returns None
       uow.commit()
-  return order.id                          # known before the transaction opened
+  return order.id                          # known before the transaction opened, so nothing is read back
   ```
 
   *Why not a sequential integer — the alternative at its real strength.* It is genuinely easier
@@ -1490,6 +1537,11 @@ and Part 4 of `03-roadmap.md`).
   in the same change. *Removes* the id generator from the list of ports 3.4 defines.
   *Left to 3.4:* whether signatures name `UUID` directly or a `NewType` per entity — a question
   about the typed boundary, which is 3.4's subject.
+  *The sample's last line was changed twice and stands as written.* 6.1 amended it to `return order`
+  on 2026-08-11, when `POST /orders` answered with the whole order, and restored it on 2026-08-13
+  when that record reversed. It is amended in place rather than annotated, because it is code a
+  reader would copy. The identifier scheme this item decides was never in question either way — the
+  id is known before the transaction opens, which is what the line exists to show.
   *Source:* R1, R4, R11, R12. *Constrained by:* 2.5, 3.1, 3.5, 4.8, 7.5. *Constrains:* 3.4, 4.1,
   4.5, 4.6, 7.2.
   *Revisit if:* a test needs to predict an identifier, or an identifier acquires business meaning —
@@ -1778,6 +1830,202 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 6 — API contract
 
+- **6.1 Request and response schemas.** `[decided]`
+  *Decision:* **three request schemas and five response schemas.** Every request model is declared
+  `extra="forbid"` (2.3), and every violation returns `422` (4.2).
+
+  | Endpoint | Request | Response |
+  |---|---|---|
+  | `POST /orders` | `CreateOrderRequest` — `customer_name`, `address`, `items`; the bounds are 4.2's | `Created` |
+  | `PATCH /orders/{id}/status` | `UpdateStatusRequest` — `status` only | `OrderResponse` |
+  | `GET /orders/{id}` | — | `OrderResponse` |
+  | `GET /orders` | — | `list[OrderSummary]` |
+  | `POST /drivers` | `RegisterDriverRequest` — `name` only (6.4), 1 to 100 characters | `Created` |
+  | `GET /health` | — | `{"status": "ok"}` |
+
+  **`OrderResponse`** — nine keys: `id`, `customer_name`, `address`, `items`, `status`,
+  `assignment_state`, `assigned_at`, `created_at`, `driver`. Exactly 4.1's nine entity fields, with
+  `driver_id` **replaced by** 6.5's nested object rather than carried alongside it — 13.6's line,
+  that a fact written in two places eventually disagrees with itself, applies to a JSON document as
+  much as to this file.
+  **`OrderSummary`** — 6.6's five fields, unchanged.
+  **`DriverResponse`** — `{id, name, status}`, and it **is** 6.5's nested object. It serves that
+  nesting alone; `drivers.created_at` stays in the entity as 5.4's tie-breaker and never leaves the
+  system — delete it from the response and no named DoD row fails (1.1).
+  **`Created`** — `{id}`, and it serves both creations.
+
+  *`POST` answers with the identifier alone. **Reversed on 2026-08-13**; this record previously
+  returned the whole order and amended 4.7's sample to match.* The original argument was that an
+  id-only response costs a second round trip for a fact the server has just written. That argument
+  is nearly empty at a creation: **a newly created record holds no fact the client cannot predict** —
+  every new order is `RECEIVED` with `PENDING` and no driver (4.9), every new driver is `AVAILABLE`
+  (6.4), and the remaining fields echo what the client just sent. Only the identifier and
+  `created_at` are the server's, and nothing reads the second at that moment. 1.2's step 4 lists the
+  orders immediately afterwards, so the status is shown through `GET /orders` either way.
+  *What the reversal costs, stated:* one more response schema, and `DriverResponse` stops carrying a
+  body of its own. What it buys is a creation response that carries no field the caller sent us, and
+  a client that never has to be told which fields of its own request were kept.
+  *What it does not change — the contrast is the whole reason the two differ:* `PATCH` keeps the
+  full representation. Its body carries `assignment_state`, which 4.9 lets survive as `FAILED` into
+  `DELIVERED`, so the client learns something it did not send and cannot compute. 6.2 argues that at
+  length when it rejects `204`. That argument is real there and absent here.
+  *Rejected:* **a `Location` header beside the id** — the orthodox completion of this shape, and no
+  consumer reads it: 3.6's CLI branches on the status code and 12.3's suite composes its own URLs.
+  Under 1.1's ceiling test nothing degrades without it. **A full representation on `POST`** — the
+  form this record shipped until the reversal; it is defensible and it was carried by one argument
+  only, that a single `OrderResponse` serves three endpoints instead of two.
+
+  *Two smaller calls.* **Timestamps are not pinned to a spelling.** The contract is ISO 8601 with an
+  explicit UTC offset — Pydantic v2's default, no custom serializer — and 12.3's assertions are on
+  presence and on `null`. Pinning the final character buys nothing and invites a test that breaks on
+  a library upgrade. **Status values match exactly, in upper case.** 4.9's `Enum` carries explicit
+  string values and Pydantic rejects anything else with `422`, which is precisely 5.2's "an
+  unrecognised status string never reaches the core". Case-insensitive parsing would be hand-written
+  leniency in a contract with no client that needs it.
+
+  *Handed to 6.3:* the `503` body of `GET /health`. It is not a domain error, so 5.2's table does
+  not reach it and this item does not decide it.
+  *Recorded as an assumption:* the brief specifies no response body for `POST /orders` or
+  `PATCH /orders/{id}/status` — **A27**.
+  *Source:* R1–R4, R11, R18. *Constrained by:* 4.1, 4.2, 4.3, 4.7, 6.4, 6.5, 6.6, 7.6.
+  *Constrains:* 6.2, 6.3. *Realised in:* U7.
+
+- **6.2 Status codes.** `[decided]`
+  *Decision:* **eight rows, and no deliberate `5xx` anywhere in the system.**
+
+  | Case | Code | Produced by |
+  |---|---|---|
+  | `POST /orders` succeeds | `201` | the router |
+  | `POST /drivers` succeeds | `201` | the router |
+  | `PATCH /orders/{id}/status` succeeds | `200`, carrying the order (6.1) | the router — 7.6 holds this even when the publish failed |
+  | `GET /orders/{id}`, `GET /orders` | `200` | the router |
+  | Order id well-formed but not found | `404` | `OrderNotFound` → `errors.py`'s table (3.1, 3.4) |
+  | Illegal transition | `409` | `IllegalTransition` → the same table (5.2) |
+  | Validation failure — unknown field, bound exceeded, unrecognised status value, malformed UUID in the path | `422` | Pydantic, before the core sees anything (4.2, 5.2) |
+  | `GET /health` cannot reach the database | `503` | the router (6.6) |
+
+  *`201`, and still no `Location` header.* Both creations answer with `{"id": …}` since 6.1's
+  reversal, which is most of the orthodox creation shape; the header is the part that stays out,
+  because no consumer reads it. The code costs a `status_code=201` argument and is simply the
+  accurate one. *Rejected:* a uniform `200` for every success — the only consumer it would simplify
+  is the CLI, which does not branch on a success code.
+
+  *`PATCH` returns `200` with a body, and `204` is rejected on one fact.* `204` forbids a body, so
+  the code and the body are a single question. The usual argument for a body — a saved round trip —
+  is weak here, since 1.2's demo re-reads the order separately at steps 9 and 12. The argument that
+  holds is `assignment_state`: 4.9 writes `COMPLETED` on the transition into `DELIVERED` **unless the
+  state is `FAILED`, which survives**, so the response to a `PATCH` carries a fact the client did not
+  send and cannot compute — whether a driver was ever dispatched. That is precisely the second axis
+  4.4 exists to express, and `204` would blank it at the moment it is written. Secondary: 6.1 gives
+  `POST`, `PATCH` and `GET` one response schema, and `204` would make `PATCH` the sole exception;
+  12.3's HTTP-only suite would pay a second call for every assertion on a transition's result.
+  *What `204` genuinely buys* is semantic precision when the server has nothing to say. Here it has
+  something to say.
+  **This fills a gap rather than restating one.** 7.6 states `200` with the updated order but argues
+  only why not `5xx`, and 6.1 carried the body into its schema table without defending it. The
+  developer's question surfaced that the body had been written three times and reasoned zero times.
+
+  *`422`, not `404`, for a malformed identifier in the path.* `GET /orders/banana` fails FastAPI's
+  own path-parameter validation, which is the same mechanism, in the same layer, that rejects
+  `{"status": "FLYING"}`. It keeps 5.2's line intact: **malformed input is `422`; a well-formed
+  request the rules refuse is not.** *Rejected:* overriding it to `404` — the reasonable opposite
+  reading, "nothing lives at this URL", and it collapses a garbage identifier and a real-but-absent
+  one into one answer, at the cost of hand-written code to achieve it. Recorded here because it is
+  the one row where a reviewer may expect `404` and receive `422`.
+
+  *"Unknown driver" has no code, because it has no endpoint.* The inventory named it alongside the
+  other three failures; 6.6 has since closed the endpoint list, and no path accepts a driver id —
+  `POST /drivers` supplies one. The failure mode does not exist rather than being left uncoded. It
+  enters this table as `404` if FW3 is ever built.
+
+  *No deliberate `5xx`.* 7.6 already refuses one for an unreachable broker, and nothing else in the
+  design produces a server-side failure by design. An unhandled exception yields FastAPI's `500`,
+  and that is **a defect, not a contract** — stated in those words so that a `500` in a test run
+  reads as a bug rather than as a covered path.
+  *Source:* R1–R4, R18. *Constrained by:* 4.2, 4.4, 4.9, 5.2, 6.1, 6.6, 7.6. *Completes:* 7.6's
+  unargued body. *Constrains:* 6.3, 12.2. *Defines:* F1, F13. *Realised in:* U7.
+
+- **6.3 Error response body format.** `[decided]`
+  *Decision:* **one key — `detail` — on every error response, no envelope, and no override of
+  FastAPI's validation handler.** `404`, `409` and `503` are declared in the OpenAPI document
+  through constants that sit beside the mapping table in `errors.py`.
+
+  | Code | Body |
+  |---|---|
+  | `404` | `{"detail": "Order <id> not found"}` |
+  | `409` | `{"detail": "Cannot advance order from BAKING to PREPARING"}` |
+  | `422` | Pydantic's structured list, unchanged |
+  | `503` | `{"detail": "Database unreachable"}` |
+
+  *The item's premise was false, and that is what it actually decides.* It offers a choice between
+  "one consistent shape" and "the framework default" — but **FastAPI has two defaults, differing in
+  type, not merely in wording**: `HTTPException` produces `{"detail": <string>}`, while a validation
+  failure produces `{"detail": [<object>, …]}` carrying `loc`, `msg` and `type` per field. Accepting
+  the defaults is therefore not automatically consistent, and imposing one shape means overriding
+  the handler for `RequestValidationError`. The item was framed as a cheap choice between two
+  options; it is a choice between two costs.
+
+  *What the chosen consistency asserts, stated exactly:* **one key on every error, whose type varies
+  with the class of failure** — a string where the server can state a sentence, a list where the
+  failure is per-field and there may be several. That is not the absence of a decision: it is 5.2's
+  own distinction, between malformed input and a well-formed request the rules refuse, made visible
+  in the body rather than only in the code.
+
+  *Rejected — **an envelope** (`{"error": {"code": …, "message": …}}`).* The orthodox choice and the
+  strongest alternative. It fails on **information**: Pydantic's `422` says which field failed and
+  why, per field, and squeezing it into an envelope means either discarding that detail or nesting
+  it inside — at which point the envelope has unified the outer key only, which is the thing it
+  existed to do. Its other payoff, a machine-readable code, has no consumer: 3.6 made the CLI a thin
+  adapter that branches on the HTTP status.
+  *Rejected — **RFC 7807 / `application/problem+json`***. The standard-blessed shape (`type`,
+  `title`, `status`, `detail`), carrying every cost of the envelope plus a media type nothing in
+  this stack negotiates. A standard adopted without a consumer is decoration.
+  *Rejected — **a separate `code` field***. 1.1's ceiling test: delete it and no named DoD row
+  fails. Every status maps to exactly one domain error today — `404` is `OrderNotFound`, `409` is
+  `IllegalTransition` — so `code` restates a number already in the response.
+  *Rejected — **structured `from` / `to` keys on the `409`***. The only consumer prints them; a
+  sentence does the same work without a second schema.
+
+  *Why the message names both statuses.* The one argument here resting on a graded row rather than
+  on taste: R11 is marked "an easy-to-use console client", and this string is what its user reads.
+  *"Cannot advance order from BAKING to PREPARING"* tells them what to do next; *"Illegal
+  transition"* makes them guess. 5.2 already puts both values on the domain error, so this is
+  message design, not data collection.
+
+  *The OpenAPI declaration, and the duplication the developer caught.* FastAPI generates the `422`
+  schema itself and documents the success body from `response_model`, but **`404` and `409` reach
+  the document only if a route declares them** — they are produced at runtime by `errors.py`'s
+  handler, and nothing on the route mentions them. This is true under any body format, so it is not
+  an argument for or against an envelope. Left undeclared, the document states that the operation
+  returns `200` or `422` — not incomplete but **inaccurate**, against precisely the property 2.3
+  bought FastAPI for.
+  **The first form of this decision put a literal dict on each route, and called it free. It is
+  not.** The status number would then be written both where it executes (`_STATUS`) and where it is
+  described, and a later remapping would leave the document asserting the old code with nothing to
+  catch it — 13.6's line, which 6.1 had invoked two items earlier to reject `driver_id` beside the
+  nested driver. The rule was applied to one item and ignored in the next.
+  *The form that ships:* named constants declared beside the table that produces the behaviour, and
+  composed per route.
+
+  ```python
+  # entrypoints/api/errors.py
+  _STATUS   = {OrderNotFound: 404, IllegalTransition: 409}
+  NOT_FOUND = {404: {"description": "Order not found"}}
+  CONFLICT  = {409: {"description": "Illegal transition"}}
+  ```
+
+  The number is written once, in one file, two lines apart. What stays on the route is which
+  failures belong to it — genuine per-route information: `POST /orders` takes neither,
+  `GET /orders/{id}` takes `NOT_FOUND`, `PATCH` takes both.
+  *Rejected — **declaring nothing***. It removes the duplication completely and leaves the contract
+  document wrong. An inaccuracy neutralised by one constant beats one left standing.
+
+  *Closes 6.1's hand-off:* the `503` body of `GET /health` carries the same key. It is not a domain
+  error and does not pass through the handler, but it is written by hand in one route and there is
+  no reason for it to look different.
+  *Source:* `CLAUDE.md` §6, R11, R18. *Constrained by:* 2.3, 3.1, 3.6, 5.2, 6.1, 6.2.
+  *Constrains:* 9.4, 12.2. *Realised in:* U7.
+
 - **6.4 Driver registration payload.** `[decided]`
   *Decision:* the request body carries **no status field**. Every driver is registered
   `AVAILABLE`. The response — and every later read — includes `status`, whose only two values
@@ -1871,6 +2119,17 @@ and Part 4 of `03-roadmap.md`).
   startup ordering, not runtime restarts.
   *Source:* R11, R14, `CLAUDE.md` §6, 1.1. *Answers:* Q11, Q12.
 
+- **6.7 Path prefix and versioning.** `[decided]`
+  *Decision:* **no prefix.** The paths are R1–R4's own — `/orders`, `/orders/{id}`,
+  `/orders/{id}/status`, `/drivers` — plus `/orders` for the list and `/health` (6.6). There is **no
+  versioning**, and its absence is a decision rather than an omission: a second version answers a
+  contract change, which nothing here anticipates, so it is not a Part 5 entry either.
+  *Why:* the brief writes the paths literally, and a prefix would make the delivered API differ from
+  the text a reviewer compares it against.
+  *Rejected:* `/api/v1` — the convention, buying a migration path for consumers that do not exist;
+  `/api` alone — the prefix's cost without its purpose.
+  *Source:* R1–R4, R19. *Constrains:* 9.4, 12.2, 13.1. *Realised in:* U7.
+
 - **6.8 Authentication.** `[decided]`
   *Decision:* **none.** Every endpoint is open. Recorded in the README under assumptions:
   *"There is no authentication. The API targets an internal network and a demonstration
@@ -1879,6 +2138,78 @@ and Part 4 of `03-roadmap.md`).
   would be an unrequested feature (`CLAUDE.md` §6); leaving it unmentioned would be an
   unstated assumption (§7). Stating the absence satisfies both.
   *Source:* `CLAUDE.md` §7. *Answers:* Q15. *Deferred to:* FW9.
+
+
+- **6.9 Concurrent `PATCH` behaviour.** `[decided]`
+  *Decision:* the write path reads the order with **`SELECT … FOR UPDATE`**. The second request
+  blocks, re-reads the committed status, and `advance_to` refuses it — **`409`**, through 5.2's
+  existing mapping. Read paths are untouched and take no lock.
+
+  *The scenario is real, not hypothetical.* 2.4 chose a synchronous runtime, and FastAPI serves `def`
+  handlers from a thread pool, so two simultaneous requests genuinely run in parallel, each in its
+  own transaction (3.5). Under PostgreSQL's default `READ COMMITTED`:
+
+  | | T1 | T2 |
+  |---|---|---|
+  | 1 | reads `PREPARING` | |
+  | 2 | | reads `PREPARING` |
+  | 3 | `advance_to(BAKING)` passes | |
+  | 4 | | `advance_to(BAKING)` passes — in memory, on a stale copy |
+  | 5 | `UPDATE`, commit | |
+  | 6 | | `UPDATE` (blocked until 5, then rewrites `BAKING`), commit |
+
+  Both return `200` and **two `ORDER_READY` events are published**, where serial execution yields
+  `200` then `409`.
+
+  *Stated precisely, the end state is not corrupted.* 5.1 makes transitions linear and single-step,
+  so two concurrent updates on one order can only ever request the **same** next status — anything
+  else fails in memory regardless of timing. The anomaly is a **duplicated side effect, not a wrong
+  state**, and it lands on the one path 5.5 already made idempotent by design (A2).
+
+  *The one interleaving that does corrupt state, and it is why this item is not "accept it".* The
+  transition into `DELIVERED` also releases the driver (5.6). Two concurrent `DELIVERED` requests on
+  one order, with a worker claim landing between them: T1 releases driver D → the worker claims D
+  for order Y and marks it `BUSY` → T2, holding the older read, writes `AVAILABLE`. D is now
+  assigned to Y and advertised as free, so it can be dispatched twice — the rule A13 states.
+  **4.5's uniqueness constraint does not catch it:** the damage is in `drivers.status`, the
+  denormalised copy 4.3 already recorded as unprotectable, since PostgreSQL has no cross-table
+  `CHECK`. It is the ghost driver of 4.3 with the sign reversed.
+
+  *Why this option and not another — the property that makes it cheap.* The answer to "what happens
+  on a concurrent `PATCH`" becomes **"exactly what happens on a sequential one"**. No new status
+  code, no new row in 6.2's table, no new message for the CLI to render (6.3), no new code path. The
+  cost is **one method on the port** — `get_for_update` beside `get` in `OrderRepository` (3.4) —
+  used by the write path only, while `queries.py` and 6.5's two keyed reads keep `get`. It
+  introduces no new concept: 8.9 already brought `FOR UPDATE SKIP LOCKED` into the system, and 3.4
+  already carries one locking method.
+
+  *Rejected — **accepting the anomaly***. The argument for it is genuine: no delivered consumer
+  produces concurrent `PATCH`es — the CLI is one interactive user (9.2), and 12.3's scenario table
+  races **drivers** (F2), not statuses — so under 1.1's ceiling test the protection is not built. It
+  is rejected because **8.9 already refused this exact argument in this exact system**, that safety
+  must not rest on a deployment accident, and because the driver-release window above breaks a
+  stated rule rather than merely duplicating a harmless event.
+  *Rejected — **optimistic locking with a `version` column***. It adds a column to the schema, a
+  `version_id_col` configuration, and a fresh decision about what the API returns on a version
+  conflict. It buys throughput under contention this system does not have. **It would also have
+  moved this branch's merge ahead of U5**, since the column is 4.5's subject.
+  *Rejected — **a `CHECK` constraint***. It cannot compare against the previous value; expressing
+  the rule needs a trigger, which 4.3 already declined for the same reason.
+
+  *Nothing is handed to 4.5.* `SELECT … FOR UPDATE` is runtime behaviour — no column, no index, no
+  constraint — so U5's open items are unaffected and this branch merges on the ordinary schedule.
+
+  *One constraint handed to U8, recorded rather than assumed.* There is a lock-ordering question
+  here: the API locks an order and may then touch a driver, while the worker locks a driver and then
+  updates an order — an inversion, which is the standard shape of a deadlock. It does not bite,
+  because an order cannot simultaneously be assigned (the API releasing) and unassigned (the worker
+  dispatching). **That rests on `dispatch_order` reading the order before claiming a driver**, which
+  no item has fixed. 8.9 now carries the pointer.
+
+  *Not decided here:* whether F14 becomes a test scenario. This item makes it HTTP-observable — one
+  `200`, one `409` — and therefore a candidate; 12.1 chooses, and it is U10's item.
+  *Source:* R2, `CLAUDE.md` §5. *Constrained by:* 2.4, 2.5, 3.5, 4.3, 5.1, 5.2, 5.5, 5.6, 8.9.
+  *Constrains:* 3.4, 8.9. *Defines:* F14. *Realised in:* U7.
 
 
 ## Topic 7 — Broker contract
@@ -2002,6 +2333,38 @@ and Part 4 of `03-roadmap.md`).
   one — the outbox stores a copy of the message, and `deserialize` has no reader but the consumer.
   That makes `db/ → broker/` an edge inside layer 3, which 3.1's checkable rule does not cover and
   no lint catches; it is written here so that it is not later read as drift.
+
+  *Challenged at U8's gate on 2026-08-14, and the placement stands. Recorded in full because both
+  halves of the challenge are correct and the question will be asked again.* It was two questions:
+  why does 8.4's `deserialize_or_none` exist at all, and does this module belong in `application/`,
+  since it imports no broker library.
+  **The wrapper is not an independent design choice — it exists only because of this placement.**
+  The consumer has to tell an undecodable message from every other failure, because 8.4 gives the
+  two opposite dispositions: ack and drop, against reject into 8.2's cycle. To tell them apart it
+  must either name `SerializationError` or receive the distinction as a value, and 3.1 leaves it
+  unable to name one. Hence a value. Were this module reachable from `entrypoints/`, the wrapper
+  would not be written.
+  **And the module would pass for core code on the usual test.** It imports `json`, `datetime`,
+  `uuid` and `application/events.py` and nothing else, so 3.1's own question — can `domain/` and
+  `application/` run with nothing installed but Python — does not discriminate here. The "one
+  format, two sides" argument above is also true of `serialize`, which the publisher and the outbox
+  share, and not of `deserialize`, whose only reader is the consumer.
+  *What keeps it here is a different test: what changes when it changes.* A version envelope, a move
+  to a binary encoding, a renamed key — each is an adapter edit today, and each would become an edit
+  inside `application/` made because a broker's wire format changed. `EventPublisher.publish(event)`
+  is the port and the encoding is the adapter's answer to *as what bytes*; moving the codec inward
+  deletes that line. This item already refused the same move from the other direction when it
+  rejected `OutboxStore.add` taking pre-serialized bytes.
+  *The cost, stated rather than absorbed:* three artifacts exist to cross one boundary — the
+  wrapper, a constructor parameter on the consumer, and one injection in the worker's root. The rule
+  that produces them is written at **directory** granularity, so it catches a pure function over a
+  format, which is not the driven adapter it was aimed at. That granularity is kept for
+  enforceability alone: 3.1 rejected a single `core/` directory on exactly this ground — inside one
+  directory a crossed boundary shows as nothing in a diff and no lint sees it.
+  *Rejected:* **moving the module to `application/`** — above; it also reopens 8.4, which names the
+  wrapper, its signature and its injection. **Moving it to `infrastructure/serialization.py`**, this
+  item's own *Revisit if* target — it answers a different question and leaves the wrapper exactly
+  where it is.
 
   *The same function produces both copies*, the wire message and the stored `payload`. That is the
   whole point of the outbox row: it is evidence of what was meant to go out, and two functions
@@ -2201,6 +2564,11 @@ and Part 4 of `03-roadmap.md`).
   so that transition occurs on an ordinary path regardless; 4.4 is amended accordingly.
   **The decision is unaffected** — it stands on the second argument, that `PENDING` on an order whose
   status has advanced already reads as "no driver is coming".
+  *The body was asserted here, not argued — 6.2 supplies the argument, 2026-08-11.* Everything above
+  defends the **code**, `200` rather than `5xx`. That the response also carries the updated order was
+  stated in the first line and never justified, and 6.1 then carried it into its schema table on the
+  same footing. 6.2 rejects `204` explicitly, on `assignment_state`: 4.9 lets `FAILED` survive the
+  transition into `DELIVERED`, so the response holds a fact the client did not send.
   *Source:* R5, `CLAUDE.md` §5. *Answers:* Q21. *Defines:* F4 with 7.5.
 
 - **7.7 Connection lifecycle.** `[decided]`
@@ -2238,16 +2606,34 @@ and Part 4 of `03-roadmap.md`).
   *What actually bounds the publish in time.* 7.5 promised a bounded attempt and a `PATCH` blocked
   for at most roughly twice it. **A timer of ours cannot deliver that:** a blocking socket call in
   Python cannot be interrupted from another thread without closing the socket underneath it. The
-  bound must come from the library's own parameters, both fields of `pika.ConnectionParameters`
-  and both fed from 10.4:
+  bound must come from the library's own parameters — **three** of them, all fed from 10.4's single
+  timeout and set on the `pika.Parameters` instance the adapter builds, which is a `URLParameters`
+  because 10.1 supplies one string:
 
   | Parameter | What it bounds |
   |---|---|
-  | `socket_timeout` | connection establishment and socket operations — a broker that does not answer |
+  | `socket_timeout` | the TCP connect alone — a host that does not answer |
+  | `stack_timeout` | the whole bring-up: TCP, then the AMQP handshake, then the channel |
   | `blocked_connection_timeout` | the broker signalling `Connection.Blocked` under memory or disk pressure; without it a publish waits **indefinitely**, a failure that presents as a hang rather than an error |
 
-  `connection_attempts` stays at its default of 1, so the bound remains one attempt and one
-  timeout; the worker's startup retries are a different question and belong to 8.8.
+  *`stack_timeout` was added on 2026-08-12, and the bound this record named was not the bound in
+  force without it.* The table read "both fields", giving `socket_timeout` "connection
+  establishment and socket operations". Checked against pika 1.4.4 rather than from memory:
+  `socket_timeout` is documented as the `socket.connect()` timeout, and the full stack bring-up is
+  bounded by `stack_timeout`, whose default is **15 s**. A broker completing the TCP connect and
+  then stalling the handshake would have held a `PATCH` for 30 s against the 10 s 7.5 promises —
+  the two differing by three times, in the one place this item exists to fix.
+
+  `connection_attempts` stays at its default of 1 — read from the library, not assumed — so the
+  bound remains one attempt and one timeout; the worker's startup retries are a different question
+  and belong to 8.8.
+
+  *What no parameter of ours bounds, filed as FW17 rather than accepted in silence:* the wait for a
+  publisher confirm on a connection that is established and then goes quiet. `basic_publish` polls
+  until the confirm arrives or the connection closes, so the ceiling there is the heartbeat
+  mechanism below rather than 10.4's timeout. It is a different failure from the two 7.5 names, and
+  closing it needs the dedicated publisher thread this item already rejected — which is why it is a
+  future-work entry and not a repair.
 
   *Heartbeats stay at `pika`'s default, and the reason is worth stating.* `BlockingConnection`
   services heartbeats only while the application is **inside** a `pika` call. An API that publishes
@@ -2267,6 +2653,31 @@ and Part 4 of `03-roadmap.md`).
   ceremony: it is idempotent and cheap, and it is the only path by which a broker that came up on
   an empty volume gets its topology back without restarting a service.
 
+  *Which failures it answers: **every** AMQP fault, not a classified subset.* Raised as a review
+  question on 2026-08-12 — most `pika` exceptions do not mean the connection died, so should the
+  retry be narrowed to the ones that do? The four that reach a publish in confirm mode, read from
+  pika 1.4.4:
+
+  | Raised | The connection | What the blanket reconnect produces |
+  |---|---|---|
+  | `UnroutableError` | alive | re-declares the topology, publishes, **succeeds** |
+  | `ChannelClosedByBroker` (406) | alive, channel dead | re-declares, fails identically, `PublishFailed` |
+  | `NackError` | alive | one more attempt, then `PublishFailed` |
+  | `StreamLostError`, `ConnectionClosed`, `AMQPHeartbeatTimeout` | dead | the stale-connection case above — the reason the retry exists |
+
+  **The first row decides it.** `UnroutableError` is the one that most looks like a fault no
+  reconnect can help, and it is the one where reconnecting is the entire repair — it is how the
+  paragraph above returns a topology to a broker that lost it. A classification excluding
+  "not a disconnect" would exclude exactly that, while reading as the more precise rule.
+  *The outcome is already correct in all four rows*, so what the blanket policy costs is one
+  wasted connection attempt on rows 2 and 3 — bounded by the timeouts above, and inside the two
+  attempts 7.5 promises. What the alternative costs is a table of exception types maintained by
+  hand against a library that ships no type information, so that a `pika` upgrade can silently
+  reclassify a failure.
+  *Recorded rather than left implicit because the question is a good one and will be asked again.*
+  7.5 fixed that a failure on an established connection is retried once; it did not say **which**
+  failures, and this is that sentence.
+
   *The consumer.* One connection, one channel, `basic_qos(prefetch_count=1)` per 8.5,
   `basic_consume` then `start_consuming()` on the main thread; the order read, the claim and the
   ack all happen inside the callback on that same thread. **There is no thread-safety problem on
@@ -2283,7 +2694,7 @@ and Part 4 of `03-roadmap.md`).
   access by construction, so an async runtime needs no lock. That entry already records this from
   its side; this is the reference back.
   *Source:* R5, R10. *Constrained by:* 2.4, 2.7, 3.1, 3.4, 7.1, 7.3, 7.5, 7.6, 8.5.
-  *Constrains:* 8.4, 8.8. *Deferred to:* FW12. *Realised in:* U6, U8.
+  *Constrains:* 8.4, 8.8. *Deferred to:* FW12, FW17. *Realised in:* U6, U8.
 
 
 ## Topic 8 — Worker
@@ -2345,6 +2756,74 @@ and Part 4 of `03-roadmap.md`).
   is not one.
   *Source:* R9, R17. *Answers:* Q6. *Defines:* F7. *Completed by:* 7.4.
 
+- **8.4 Poison message handling.** `[decided]`
+  *Decision:* **three classes of failure, two dispositions, and one decoding seam.**
+
+  | Class | Disposition |
+  |---|---|
+  | The bytes do not decode — `SerializationError` (7.3), malformed UTF-8 included | log at `ERROR` with the body, **`ack`**, drop |
+  | `OrderNotFound` — a well-formed event naming an order that is not in the database | log at `ERROR`, **`ack`**, drop |
+  | Any other exception | log at `ERROR` with the traceback, **`reject(requeue=false)`** into 8.2's cycle, **unbounded** |
+
+  *Why the first two drop — nearer to forced than chosen.* Neither is repairable by time, and
+  neither leaves anything to record: the `order_id` of an undecodable message is inside the bytes
+  that did not decode, and an order that is not there has no row to mark, so 8.3's `FAILED` is
+  unavailable and the log line is the whole record. `OrderNotFound` is a broken invariant rather
+  than a race — 7.5 writes the outbox row in the order's own transaction and publishes after the
+  commit.
+  *Rejected:* **a parking queue** — 8.3 declined one for the exhaustion path as invisible and
+  irrecoverable without FW5; here it is worse, since a parked message we cannot name an order for
+  has no reader at all.
+  *Accepted cost, recorded as A28:* the order stays `PENDING` with no `FAILED` marker. Bounded
+  rather than removed by two facts: R5 publishes twice per order, and the only producer is our own
+  `serialize`, so this class means a bug of ours or a hand-injected message.
+
+  *Why the third retries, and unbounded.* Its two populations — a transient infrastructure fault
+  and a bug of ours — are both repaired by something a person does, after which the message passes
+  and is acked. The cycle is self-healing and loud: one `ERROR` per TTL until somebody acts. The
+  exhaustion path is not a special case: with the database down, 8.3's `give_up()` raises into
+  this class and the message keeps circling until the database returns.
+  *Rejected:* **`ack` and drop** — a one-second database blip costs an order silently and
+  permanently, which is the failure 7.4 called *categorically worse*; this record does not reverse
+  that ranking one item later. **A bounded reject, dropping after N** — nothing derives N, and a
+  fault outlasting N × TTL still loses orders while consuming the ones behind them.
+  *Accepted cost:* every `reject` increments the same `x-death` entry 7.4 made the retry budget,
+  so a spell of exceptions shortens 10.4's 64-second demo floor. A second counter needs a header
+  of ours and a republish, both already rejected by 8.2 and 7.4.
+
+  *Can a poison message block the queue — the question the item was opened on.* **No.** 8.5 holds
+  one unacknowledged message at a time, and all three paths terminate inside the callback in an
+  `ack` or a `reject`.
+
+  *The seam, which 7.3 and 7.7 both left here.* 3.1 forbids `entrypoints/worker/consumer.py` to
+  import `infrastructure/`, so it can name neither `deserialize` nor `SerializationError`. One
+  function joins 7.3's pair in its module:
+
+  ```python
+  # infrastructure/broker/serialization.py
+  def deserialize_or_none(raw: bytes) -> OrderReadyEvent | None:   # None on SerializationError
+  ```
+
+  `entrypoints/worker/main.py` injects it as a `Callable[[bytes], OrderReadyEvent | None]`; the
+  consumer holds the `pika` callback, logs the poison line from the body it already has, and acks.
+  The `except` names one declared type and converts it to a value the signature forces every caller
+  to handle, so a bug of ours passes through it into the third class rather than being swallowed.
+  *What the consumer may import, since the arrangement rests on it:* 3.1's enforceable rule names
+  `infrastructure` and nothing else, and its own tree places `schemas` under `entrypoints/api/`,
+  which 2.3 made Pydantic classes — a driving adapter carrying its own transport library is the
+  established shape, and `pika` here is the worker's case of it.
+  *Rejected:* **a consuming adapter in `infrastructure/broker/`** — it drags 8.1's acknowledgement
+  policy across the seam, and that policy reads business outcomes, not a library. **Wrapping the
+  call in `main.py`** — real logic hidden in wiring.
+
+  *Left open deliberately:* every log line's shape here, truncation included, is **8.7**. The
+  connection loop around the callback is **8.8**.
+  *Source:* R10, DoD. *Constrained by:* 3.1, 7.3, 7.4, 7.7, 8.1, 8.2, 8.3, 8.5.
+  *Realised in:* U8. *Corrected on 2026-08-14:* this line read U6, which had already merged in
+  pull request #11 when this record closed in #13 — so the wrapper was assigned to a unit that had
+  shipped, and it exists on no branch. It still sits beside `deserialize` in 7.3's module, for the
+  reason this record gives; only the unit that writes it changes.
+
 - **8.5 Consumer concurrency.** `[decided]`
   *Decision:* **one worker replica in compose, prefetch 1.** This is a deployment choice, not
   a correctness mechanism — correctness comes from 8.9. The README states that scaling to N
@@ -2400,6 +2879,134 @@ and Part 4 of `03-roadmap.md`).
   `docker compose up`, which is a real job — just not an assertion's job.
   *Source:* R8. *Answers:* Q7. *Constrains:* 8.7.
 
+- **8.7 Logging format and levels.** `[decided]`
+  *Decision:* **`key=value` on one line, through the standard library, correlated by `order_id`.**
+  It governs both services, not only the worker: 10.4 gives them one `PIZZA_LOG_LEVEL`, and a
+  format defined per service is a format that will differ.
+
+  *Configuration.* One function, `configure_logging(level: str) -> None` in `pizza/log.py`,
+  called by both `main.py` files. The record line is
+  `%(asctime)s %(levelname)-8s %(name)s %(message)s`, and the message is `event=<name>` followed
+  by fields. The default stream stands — Docker captures both, so there is nothing to choose.
+
+  *Every line the system emits, with its level:*
+
+  | Line | Level | Fixed by |
+  |---|---|---|
+  | `event=worker_ready` | `INFO` | 8.8 |
+  | `event=dispatch_notification order_id driver_id driver_name at` | `INFO` | 8.6 |
+  | `event=no_driver_available order_id attempt` | `WARNING` | 8.2's cycle |
+  | `event=dispatch_failed order_id` | `ERROR` | 8.3 |
+  | `event=poison_message body` | `ERROR` | 8.4 |
+  | `event=order_not_found order_id` | `ERROR` | 8.4 |
+  | `event=dispatch_error order_id`, with the traceback | `ERROR` | 8.4 |
+  | `event=broker_unreachable` · `event=broker_connection_lost` | `ERROR` | 8.8 |
+
+  `WARNING` rather than `INFO` for the no-driver rejection, because those are the lines a reviewer
+  is meant to watch: 1.2's steps 7 and 8 are 64 seconds of that cycle, and they should not read as
+  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output,
+  and no per-library level is curated, since a filtered module list is configuration with no
+  reader.
+  *`at=` is not a duplicate of `asctime`:* it is when the assignment happened, taken from the
+  `Clock` and written to the database, against when the line was emitted.
+
+  *Why `key=value` and not JSON per line.* The only consumer is a person reading
+  `docker compose up`; there is no aggregator in Compose to parse for. JSON would roughly double
+  the width of every line and make it harder to scan by eye, in exchange for a capability nothing
+  uses. 8.6 also already fixed the shape of one line, and 2.6 declined `structlog` on the ground
+  that the standard library covers it.
+
+  *Correlation is `order_id`, and no trace identifier is generated.* The order id is already the
+  same value in the API request, the outbox row, the message and every worker line, and it is what
+  a person actually searches for — "what happened to this order". A trace id generated at the edge
+  would correlate one request rather than one order's life, and carrying it to the worker means
+  reopening 7.2, which is decided and carries identifiers only.
+
+  *The truncation 8.4 deferred: **200 bytes, logged as `repr`**.* The number is derived rather than
+  picked — 7.2's payload is three identifiers and a timestamp, about 150 characters serialized, so
+  200 shows a whole well-formed message and the head of anything larger. `repr` rather than a
+  decode, because malformed UTF-8 is one of the causes of that line, and decoding would fail on
+  exactly the input it was written for.
+
+  *Roadmap consequence, recorded rather than assumed:* U7 builds `pizza/log.py` because it is the
+  first entrypoint, so `8.7` joins U7's *Decided by* cell in Part 4.
+  *Source:* R8, R9, DoD. *Constrained by:* 2.6, 7.2, 8.4, 8.6, 8.8, 10.4.
+  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines).
+
+- **8.8 Startup and shutdown behaviour.** `[decided]`
+  *Decision:* **the worker retries nothing itself, and handles no signal.** It exits on a broker it
+  cannot reach or has lost, and the restart policy brings it back; on `SIGTERM` it dies where it
+  stands, and the message in hand is redelivered.
+
+  *The database needs nothing here, and the absence is the decision rather than an omission.*
+  Three items already cover its three cases: 4.6 starts the worker only after the one-shot schema
+  service exits zero, so it never meets an unready database; 8.4 puts a database that falls over
+  mid-message into its third class, where the message circles until it returns; and 2.5's
+  `pool_pre_ping` replaces a connection that went stale. A fourth mechanism here would be the
+  only one of the four nobody needed.
+
+  *The broker: no loop of ours.* A `BlockingConnection` that cannot be opened, and a connection
+  lost inside `start_consuming()`, both log one `ERROR` and exit non-zero. The retry is Docker's
+  restart policy and its own exponential backoff.
+  *Why exiting costs nothing:* the worker holds no state. Everything durable is in PostgreSQL and
+  the broker, and a message in flight was unacknowledged, so 7.4's redelivery applies exactly as
+  it does to any other connection loss. A restarted process resumes by taking the next message,
+  which is all the old one was doing.
+  *Rejected:* **an unbounded in-process reconnect loop at a fixed cadence** — it pays for a delay
+  constant nothing derives, for a bounded-or-not decision that only exists once the loop does, and
+  for a `while True` around the whole subscription; and it leaves the service reporting `running`
+  while it cannot work, where a restarting container shows its count in `docker compose ps`.
+  **A bounded loop then exit** — the same costs, plus an N, to reach the behaviour the restart
+  policy already gives.
+
+  *This narrows 7.7, and does not do so quietly.* Its *"every connection, first or subsequent,
+  declares the topology before subscribing"* stays true of the publisher and empties on the
+  consumer side, where every connection is now a first connection. The asymmetry is earned rather
+  than arbitrary: the publisher reconnects in process because it is inside an HTTP request and
+  cannot exit, and the worker is under no such constraint. 7.7 already records one asymmetry
+  between the two, over heartbeats.
+
+  *Shutdown — `entrypoints/worker/main.py` registers no signal handler.* `SIGTERM` takes Python's
+  default disposition and the process dies where it stands. A message being processed at that
+  moment was never acked, so its transaction rolls back and 7.4 redelivers it to the next process;
+  8.1 acks only after the commit and 5.5 makes a repeated assignment a no-op, so the cost is one
+  duplicated attempt and no changed outcome.
+
+  *This answers the question the item was asked rather than declining it.* "How does it shut down
+  without losing an in-flight message" has two possible answers — hold the message until it is
+  finished, or make losing it harmless. The second is already built, by three items that exist for
+  their own reasons, and it covers `SIGKILL` and a pulled plug as well, which no handler ever could.
+
+  *Reversed on 2026-08-13; this item previously registered a handler.* It called
+  `connection.add_callback_threadsafe(channel.stop_consuming)`, so that a signal arriving mid-message
+  enqueued a request rather than acting on it, and the process exited `0`. What that bought was the
+  message in hand finishing immediately instead of being redelivered — and 11.7's disposable
+  environment discards, on the same `down`, the database the work was written to, so the difference
+  is not observable. What it cost was six lines carrying a `pika` re-entrancy hazard, an edge case
+  for an already-closed connection that had to be written out so U8 would not improvise, and a
+  second shutdown path to reason about. `CLAUDE.md` §3 settles that trade against it.
+
+  *One consequence, named because 11.11 rests on it:* the worker now has **no exit path that
+  returns `0`**. `start_consuming()` returned only when `stop_consuming` was called, and that call
+  was the handler. Every exit is non-zero — a broker failure through our own code, and a signal
+  through termination, which Docker reports as `143` under the 128-plus-signal convention.
+
+  *One `INFO` line once `basic_consume` has succeeded*, so `docker compose up` shows the worker
+  reaching readiness. Its shape and level are 8.7's, with every other line in the worker.
+
+  *Handed on, so that neither side decides the other's half by implication:*
+
+  | To | What | Kind |
+  |---|---|---|
+  | 11.11 | The worker's resilience **is** the restart policy — it must restart the worker on a non-zero exit. Nothing in the code retries, and no exit is `0` | **requirement** |
+  | 11.9 | The image's `CMD` must be **exec form**. Under shell form `sh` receives the `SIGTERM` and does not forward it, so no process in the container ever sees it: `uvicorn` cannot finish its in-flight HTTP requests, and every service is force-killed at the end of the grace period on each stop | **requirement** |
+  | 11.2 | The worker needs no `depends_on` on the broker for correctness. Without one it will exit and restart a handful of times on each `up` while RabbitMQ boots — legibility, and 11.2's to weigh | note |
+  | 11.2 | The worker offers **no healthcheck** and no endpoint to probe; it speaks no HTTP, and 6.6's probe is the API's. A worker healthcheck would need a mechanism invented for it | note |
+  | 11.2 / 11.11 | `stop_grace_period` is Compose's. 8.8 fixes only that the worker's exit is immediate — it holds nothing open and finishes nothing | note |
+
+  *Source:* R14, R10. *Constrained by:* 4.6, 5.5, 7.4, 7.7, 8.1, 8.4, 8.5.
+  *Narrows:* 7.7. *Constrains:* 11.2, 11.9, 11.11. *Realised in:* U8.
+
 - **8.9 Concurrency-safe driver claiming.** `[decided]`
   *Decision:* the claim uses **`SELECT … FOR UPDATE SKIP LOCKED LIMIT 1`** over available
   drivers, inside the **same transaction** that marks the driver `BUSY` and writes the
@@ -2413,7 +3020,12 @@ and Part 4 of `03-roadmap.md`).
   silently the moment anyone scales the worker, including a reviewer running
   `--scale worker=2`; advisory locks — a second locking concept for no gain; an optimistic
   read-then-update retry loop — more code and more failure paths than the database primitive.
-  *Source:* R8, DoD. *Answers:* Q13. *Defines:* F2. *Constrained by A1.*
+  *Lock ordering, handed here by 6.9 on 2026-08-11.* The API locks an order and may then touch a
+  driver; this claim locks a driver and then updates an order — an inversion, and the standard shape
+  of a deadlock. It is unreachable only because an order cannot be assigned and unassigned at once,
+  **which rests on `dispatch_order` reading the order before claiming a driver**. U8 implements that
+  order deliberately; it is not free.
+  *Source:* R8, DoD. *Answers:* Q13. *Defines:* F2. *Constrained by A1.* *Constrained by:* 6.9.
 
 
 ## Topic 9 — CLI
@@ -3520,6 +4132,166 @@ and Part 4 of `03-roadmap.md`).
   *Source:* `CLAUDE.md` §5. *Constrained by:* 6.5, 6.6, 11.6, 11.7. *Constrains:* 2.6, 12.1,
   12.2, 12.4, 12.5. *Feeds:* 13.4.
 
+- **12.6 Scope of the unit test set.** `[decided]`
+  *Decision:* **no amendment to `CLAUDE.md` §5 — the set stays inside "free", and the rule is
+  one of origin, not size.** A test belongs in `tests/unit/` when it runs with **no live
+  process and no test double**, and is written by the step that writes the code beneath it
+  (§8.2). Not "a business rule only": §5 grants its permission on dependency and cost,
+  nowhere on layer.
+
+  *Why the five non-`domain/` files on `main` are inside it.* §5 states a permission and a
+  purpose separately. `test_order.py` and `test_driver.py` serve the purpose — the core
+  proved testable in isolation; the other five are §8.2 met at zero cost, which the
+  permission admits alone. `test_env_example.py` reads a repository file, and §5 fixes its
+  own meaning of infrastructure in the next sentence — *"requires external services"*.
+
+  *Closed to accumulation, not to growth.* Nothing is added retrospectively to complete a
+  picture; a later unit writing pure logic writes its test under the same two conditions.
+
+  *What this leaves U4: nothing.* 5.7's free candidates are recorded *Realised in* U3, which
+  wrote all of them, and 12.7 is realised in U10 and U11 — so 5.7's *"U4 for whatever 12.6
+  opens beyond them"* resolves to nothing opened. Part 4's U4 row is a roadmap change and not
+  this item's.
+
+  *Rejected — amending §5 for a larger set:* the only target left is `application/` with
+  fakes, which 5.7 rejected and 12.2 covers over HTTP against the real thing; and a
+  project-wide rule needs more than one decision's justification (`docs/ai-log.md`,
+  2026-08-10). *— a bigger set "if time remains"*, the inventory's wording: remaining time is
+  not an admission criterion, and 1.5 left no budget to measure it against. *— no unit set at
+  all:* 5.7, unchanged. **Not rested on 1.1's ceiling test**, which would delete the set
+  whole — same log row.
+  *Source:* `CLAUDE.md` §5, R18. *Constrained by:* 5.7, 12.2, 12.3. *Answers:* Q16 in full,
+  completing A17. *Realised in:* U2, U3, U5, U6.
+
+- **12.7 Directory layout and separate run commands.** `[decided]`
+  *Decision:* **the two directories that already exist, two commands, and no pytest
+  configuration.** §5 asks for separate directories that can be run separately; both halves
+  hold today, so this item confirms a layout rather than choosing one.
+
+  | Path | Holds | Written by |
+  |---|---|---|
+  | `tests/unit/` | the free unit set (12.6), one file per module under test | U2, U3, U5, U6 |
+  | `tests/integration/` | the four scenarios of 12.2, one file | U10 |
+  | `tests/integration/waiting.py` | 12.4's `wait_until` and `stays`, and their three constants | U10 |
+  | `tests/integration/conftest.py` | 12.5's absorbing fixture | U10 |
+
+  Both directories are packages with `__init__.py`; there is no `tests/__init__.py` above them.
+
+  | Command | Runs | In 14.7's list from |
+  |---|---|---|
+  | `pytest tests/unit` | the unit set | U2 |
+  | `pytest tests/integration` | the four scenarios | U11 |
+
+  *Why the helpers sit beside the suite and not in a shared directory:* the unit set imports
+  nothing from them, so `tests/helpers/` would be an abstraction with one consumer. *Why
+  `waiting.py` and not `conftest.py` for both:* the two helpers are called by name, and
+  `conftest.py` is the file pytest loads for what is **not** named — the fixture. Splitting
+  them puts each in the mechanism it actually uses.
+
+  *No `[tool.pytest.ini_options]`, closing the deferral U1 through U5 each filed here.* Its
+  only candidate content is `testpaths`, which applies to a bare `pytest` — and both commands
+  above name a path, so it would never take effect. It would not move the cache either:
+  11.9 copies `pyproject.toml` to `/app`, so `rootdir` is `/app` with or without the section,
+  which is the fact 11.9's `chown app:app /app` already rests on.
+
+  *What this fixes for the compose test service, and what it leaves open:* the path is
+  `tests/integration` and nothing else. Flags, the PASS/FAIL summary and any report file are
+  12.9's, which 11.9 left to U11; whether lint and type checks join that run is 12.10's.
+  *Accepted cost:* 11.9 copies `tests/` whole, so `pizza-test` carries the unit set nobody
+  runs there. §5 requires the categories to be **runnable** separately, not shipped separately.
+  *Source:* `CLAUDE.md` §5. *Constrained by:* 11.9, 12.3, 12.4, 12.5, 14.7. *Constrains:* 12.9.
+  *Realised in:* U10 for the two modules, U11 for the command 14.7 gains — the directories
+  themselves have been on `main` since U1.
+
+- **12.9 Where results are surfaced.** `[decided]`
+  *Decision:* **console only, no report file** — and the `command` 11.9 left blank:
+
+  ```yaml
+  tests: command: ["pytest", "tests/integration", "-v", "-ra", "--durations=0", "--tb=short"]
+  ```
+
+  Exec form is 11.9's; the path is 12.7's and nothing is added to it. The PASS/FAIL summary
+  11.3 requires is a `pytest_terminal_summary` hook in `tests/integration/conftest.py`, which
+  writes `terminalreporter.write_sep("=", "PASS")` — or `"FAIL"` — keyed on pytest's exit
+  status. `PYTHONUNBUFFERED=1` (11.9) is what puts it in the stream on time.
+
+  | Flag | Why |
+  |---|---|
+  | `-v` | one line per test, by name. 12.4 budgets ~30 s, 12 s of it in one scenario; without it the reviewer watches silence, and the four scenarios 13.1 names are not visible as they run |
+  | `--durations=0` | every scenario's real time, which turns 12.4's per-scenario budget into something measured rather than asserted |
+  | `-ra` | a recap of everything that did not pass, gathered in one place rather than scattered through the run |
+  | `--tb=short` | the failing assertion and its values, without a full traceback in a shared stream |
+
+  *Why the banner is a hook and not a shell wrapper around the command.* 11.4 rests entirely on
+  pytest's exit status reaching `--exit-code-from tests`, and every shell form that prints a
+  banner is a place to lose it — `pytest … || echo FAIL` exits **zero**, so the CI gate would be
+  green forever and nothing would say so. The hook cannot break it: it prints beside the exit
+  status instead of between it and Compose. It also reads that status directly, so a run that
+  collected no tests at all (pytest's exit 5) prints `FAIL` rather than a green banner over an
+  empty run. *The one gap:* a usage error aborts before the hook, leaving no banner — the exit
+  is still non-zero and pytest's own error is the explanation.
+
+  *Where the banner actually lands, measured on the pinned pytest rather than assumed.* The hook
+  runs before pytest's own closing sections, so the order is `FAILURES`, the banner,
+  `--durations`, `-ra`'s recap, then the counts line — **the banner is not the last thing
+  printed, and no hook placement makes it so.** `short test summary info` and the counts are
+  written once every `pytest_terminal_summary` has run, and moving the call earlier in the
+  sequence only moves the banner further up. 11.3 asks for a summary that cannot be missed rather
+  than for a last line, and a full-width separator meets that wherever it sits.
+
+  *Why no report file.* `junit-xml` is built into pytest and needs no plugin, so 2.10's list is
+  not in question; what it lacks is a reader. It would hold less than what already survives the
+  run, and 12.3 declined the `outbox` on exactly this ground — a thing nothing in the system
+  reads. **What survives, until `down` or the next `up`:** the `tests` container exits but is not
+  removed (11.1, 11.5), so `docker compose logs tests` returns the whole run — named scenarios,
+  durations, tracebacks — with the api and worker lines that interleaved it in the live stream
+  stripped away. A shell into it is not available, because `exec` needs a running container;
+  `docker compose run --rm tests <command>` starts a fresh one from the same image against the
+  live stack, which is also how a single scenario is re-run by hand.
+  *Rejected — writing the file and bind-mounting a host directory for it:* a generated artifact
+  in the reviewer's clone, needing a `.gitignore` line, and written by 11.9's non-root `app` into
+  a directory owned by someone else — a failed write aborts pytest and colours a healthy stack
+  red in the one stream 11.3 wants clean.
+  *Rejected — writing it inside the container without a mount,* retrievable by
+  `docker compose cp`. The cost is genuinely one flag, and it is still declined: it duplicates,
+  in a format nobody here parses, a subset of what `docker compose logs tests` already gives.
+  *Source:* R15, `CLAUDE.md` §5. *Constrained by:* 11.1, 11.3, 11.4, 11.5, 11.9, 12.4, 12.7.
+  *Fills:* 11.9's `tests` row. *Feeds:* 13.4 — the absence of `junit-xml` and the flag that adds
+  it, and the three commands above. *Realised in:* U11.
+
+- **12.10 Whether lint and type checks run inside the compose test run.** `[decided]`
+  *Decision:* **local-only.** 2.8's three checks stay where 14.7 put them — a per-step
+  Definition of Done run from a local virtual environment — and nothing is added to the
+  `tests` service, whose command 12.9 fixed. **Nothing is built for this item.**
+
+  *Feasibility was never the question, so this is policy and not capability:* 3.7 and 11.9
+  install the dev group into the `test` stage for `pytest`, so `ruff` and `mypy` are already in
+  `pizza-test`, with `src/` and `tests/` both under `/app`.
+
+  *Why it is not built — 1.1's ceiling test, applied literally.* Delete the gate: which named
+  DoD row fails? *Test Automation* is `pytest` and is untouched; *Docker Deployment* does not
+  read a linter. None does, so it is not built.
+  *And it could not fire in any case.* The image is built from committed source, and §8.3 with
+  14.7 make the checks a condition of every commit; 2.9 pins the dev tools in the same
+  `requirements-dev.txt` that builds the local environment, so the versions match by
+  construction. A green result would prove nothing, and a red one would mean a commit that
+  skipped its own Definition of Done — a process failure a container cannot repair.
+
+  *Rejected — an eighth one-shot `lint` service.* 11.1 closed the list at seven.
+  *Rejected — chaining the checks into the `tests` command* as `ruff … && mypy … && pytest …`.
+  A style failure then suppresses `pytest` entirely, and with it the PASS/FAIL summary 11.3
+  requires — a decided item this one may not spend. It also lets a whitespace rule colour the
+  launch red over a system that works, which 11.5 leaves running in front of the reviewer.
+
+  *The one real argument for a gate, and what answers it:* the reviewer runs only the delivered
+  environment, so a check that ran on the author's machine is a claim they cannot verify. It is
+  answered by two commands rather than a gate, since the tools are in the image anyway —
+  `docker compose run --rm tests ruff check .` and `… mypy src tests`. Verification on demand,
+  without giving a style rule the power to stop the demonstration.
+  *Source:* `CLAUDE.md` §8. *Constrained by:* 1.1, 2.8, 2.9, 3.7, 11.1, 11.3, 11.5, 11.9, 12.9,
+  14.7. *Closes 2.8's deferral;* whether the checks run in CI stays 14.3's. *Feeds:* 13.4 — the
+  two commands above. *Realised in:* nothing; the README line is U13's.
+
 
 ## Topic 13 — Documentation and deliverables
 
@@ -3693,8 +4465,8 @@ and Part 4 of `03-roadmap.md`).
   |---|---|
   | U1 | `ruff format --check .` · `ruff check .` · `mypy src tests` · `python -c "import pizza"` |
   | U2 | + `pytest tests/unit` |
-  | U9 | + `docker compose up` reaches 11.3's PASS summary and the test service exits zero |
-  | U11 | + the same with the full integration suite |
+  | U9 | + `docker compose up` brings every service the file defines to the state 11.2's graph requires, and the stack stays up |
+  | U11 | + the `tests` service runs the suite, prints 11.3's PASS summary, and exits zero |
 
   `python -c "import pizza"` is not filler: 3.3 chose src-layout so an import resolves only
   through the install, so its failure means the package is not installed.
@@ -3705,8 +4477,19 @@ and Part 4 of `03-roadmap.md`).
   Phase 3 document may fill a silence this file left but may not amend one of its rows.
   Each Phase 3 document states its own list, and it applies **per step commit** — so `main`
   satisfies §8.6 after a merge by construction.
+  *The U9 and U11 rows were rewritten on 2026-08-14, and the U9 row was unsatisfiable as written.*
+  It required 11.3's PASS summary, which U9 cannot produce: the `tests` service is U11's, 12.7
+  gives its `conftest.py` to U10, and the four scenarios are 12.2's — so `pytest tests/integration`
+  against the empty package exits `5`, measured rather than reasoned. The rows now name what each
+  unit can actually reach. **This is the row's own rule applied to itself:** the bar is the
+  strongest verification the system supports at that point, and at U9 that is the environment
+  coming up, not a suite that does not exist yet. The U11 row said *"the same with the full
+  integration suite"* and now states its condition outright, because "the same" pointed at a row
+  that no longer names a suite.
   *Rejected:* treating it as vacuous until U9 — §8.6 would be ceremony for eight units, and
-  nobody starts believing it later.
+  nobody starts believing it later. **Leaving the U9 row and letting U9 write the `tests` service
+  to satisfy it** — it buys a red container between two merges, requires amending 12.9 on `main`,
+  and empties U11; the reasoning is in 11.1 and in `docs/ai-log.md`.
   *Source:* `CLAUDE.md` §8. *Constrained by:* 14.4. *Constrains:* every Phase 3 document.
 
 
@@ -3740,7 +4523,7 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A14** † | `GET /orders` exists — light list, newest first, no cap and no paging | 6.6 |
 | **A15** † | `GET /health` exists — `200` when the database is reachable, `503` otherwise | 6.6, 7.5 |
 | **A16** | The mock dispatch notification is one structured `INFO` log line, and not a test assertion target | 8.6 |
-| **A17** † | "3–4 automated tests" means four integration scenarios; unit tests are separate and uncounted | 12.6 *(partial)* |
+| **A17** † | "3–4 automated tests" means four integration scenarios; unit tests are separate and uncounted | 12.6 |
 | **A18** | The CLI covers status updates as well as the three operations R11 names | 9.2 |
 | **A19** † | The environment is disposable — no named volumes, `docker compose down` is the reset | 11.7 |
 | **A20** † | No authentication or authorisation | 6.8, FW9 |
@@ -3750,6 +4533,8 @@ the assignment was silent or genuinely ambiguous and a reading had to be chosen.
 | **A24** † | "Microservice" means separate processes and containers, not separate codebases — the API and the worker are two entrypoints into one package over one database | 3.3 |
 | **A25** † | The local credentials are non-secret committed defaults for a disposable environment; a real deployment supplies its own | 10.5 |
 | **A26** | Every configuration value comes from the environment, and `docker-compose.yml` is the only place a default is written | 10.1, 10.2 |
+| **A27** | `POST /orders` and `POST /drivers` answer with the identifier alone, `PATCH /orders/{id}/status` with the full order representation; the brief specifies no response body for any of them | 6.1 |
+| **A28** | A dispatch message that cannot be decoded is dropped; the order stays `PENDING` and the log is the only record | 8.4 |
 
 *Superseded:* A11 previously read "a list of typed objects — `name`, `quantity`, `toppings`".
 It was narrowed on 2026-08-07 when 1.1's ceiling test was applied to it; the structure is now

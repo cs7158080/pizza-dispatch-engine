@@ -35,10 +35,10 @@ is fixed by 14.4).
 | **U1** Foundation | Repository skeleton, package layout, dependency management, formatter/linter/type-checker config, `.gitignore` verification, `docs/ai-log.md` | 1, 2.8–2.10, 3.1, 3.3, 13.5, 14 | — | all |
 | **U2** Configuration | Typed settings object, `.env.example`, config validation at startup | 10 | U1 | U5, U6, U7, U8, U9 |
 | **U3** Business core | Order and Driver entities, status transition rules, driver-selection and assignment rules, the port interfaces, the `ORDER_READY` event type. Framework-free, no infrastructure | 3.2, 3.4, 3.5, 4.1–4.4, 4.7–4.9, 5, 7.2 | U1 | U4, U5, U6, U7, U8 |
-| **U4** Core unit tests | Unit tests for the rules identified as infrastructure-free | 5.7, 12.6, 12.7 | U3 | — |
+| **U4** Core unit tests *(nothing left to realise — see below)* | Unit tests for the rules identified as infrastructure-free | 5.7, 12.6, 12.7 | U3 | — |
 | **U5** Persistence | Schema creation (4.6), repository implementations, the `outbox` table and its insert/mark-published operations (7.5) with the event serialization it stores (7.3), integrity constraints, concurrency-safe driver claiming | 2.2, 2.5, 4.5, 4.6, 7.3, 7.5, 8.9 | U2, U3 | U6, U7, U8 |
 | **U6** Broker adapter | Topology declaration, publisher implementation, connection lifecycle | 2.1, 2.7, 7.1, 7.3–7.7 | U2, U3, U5 *(7.3's module only)* | U7, U8 |
-| **U7** API service | Routes, edge validation, error format, status-update endpoint including the publish trigger, wiring of core + repositories + publisher | 2.3, 2.4, 6, 7.5, 7.6 | U3, U5, U6 | U9, U12 |
+| **U7** API service | Routes, edge validation, error format, status-update endpoint including the publish trigger, wiring of core + repositories + publisher | 2.3, 2.4, 3.9, 6, 7.5, 7.6, 8.7 | U3, U5, U6 | U9, U12 |
 | **U8** Dispatch worker | Consumer loop, ack/nack policy, retry and dead-letter handling, poison-message handling, dispatch logging, startup/shutdown | 8 | U3, U5, U6 | U9 |
 | **U9** Compose environment | Dockerfiles, compose services, healthchecks and readiness ordering, volumes, ports, restart policies | 3.7, 11.1, 11.2, 11.7–11.11 | U7, U8 | U10, U11 |
 | **U10** Integration test suite | The 3–4 risk-ranked scenarios, condition-based waiting, data isolation | 12.1–12.5, 12.8 | U9 | U11 |
@@ -52,8 +52,11 @@ Sequential spine: **U1 → U3 → U5 → U7 → U8 → U9 → U10 → U11**.
 
 Off the spine:
 - **U2** runs after U1 and before U5; it is small and blocks everything that touches infrastructure.
-- **U4** can be written immediately after U3 and blocks nothing. It is the only work possible
-  before any infrastructure exists.
+- **U4** was placed here because it can be written immediately after U3 and blocks nothing.
+  **It has nothing left to implement.** §8.2 makes each unit verify its own steps as it goes,
+  so U3 wrote every free candidate 5.7 names, and 12.6 opened nothing beyond them; 12.7, the
+  unit's other item, is realised in U10 and U11. The number is kept and nothing is renumbered
+  — what is not expected under it is a branch, a Phase 3 document, or a commit.
 - **U6** runs after U5 for one file only: 7.3's serialization module, which U5 writes because the
   outbox row needs it and U5 does not depend on U6. Everything else in U6 depends on U2 and U3
   alone, and the edge changes no build order — U5 is already ahead of U6 on the spine, and U6 is
@@ -181,8 +184,8 @@ recorded.
   unreachable broker occupies a thread-pool thread for up to twice the configured timeout.
   *What it touches, and why it is not a small change:* unlike FW11 this is not additive. 3.5's
   `UnitOfWork` becomes `__aenter__` / `__aexit__` / `async def commit`; every repository method
-  and every use case is coloured with it; U4's unit tests need an async pytest plugin, losing
-  the "free" status `CLAUDE.md` §5 admits them under; and SQLAlchemy's async support pulls in
+  and every use case is coloured with it; the unit set needs an async pytest plugin, losing
+  the "free" status `CLAUDE.md` §5 admits it under; and SQLAlchemy's async support pulls in
   `greenlet`. `domain/` is the one layer that does not change — the entities are values and
   reach for nothing.
   *One thing it would simplify:* the publisher thread-safety obligation 2.4 hands to 7.7
@@ -275,3 +278,32 @@ recorded.
   the ordering conditions and the image stay as they are.
   *What it does not buy:* nothing about container startup order. 4.6 records that either choice
   needs the same one-shot service in the same place.
+
+- **FW17 — A bounded wait for the publisher confirm.** 7.7 feeds three `pika` parameters from
+  10.4's single timeout, and between them they bound every phase of a publish but the last. Once
+  the connection is established and the message is on the wire, the wait for the broker's confirm
+  is bounded only by the heartbeat mechanism. `pika`'s checker runs on the connection's I/O loop,
+  which **is** being serviced during that wait, and it aborts the stream after one check interval
+  with no bytes received — `heartbeat + 5` seconds, so about 65 s against RabbitMQ's default
+  60 s heartbeat, against the five seconds 10.4 configures. Read from `pika/heartbeat.py` in 1.4.4
+  rather than estimated.
+  *Why it cannot be repaired in place:* the calling thread is inside `pika` for the whole wait, so
+  no code of ours runs to check a clock; and a blocking socket call cannot be interrupted from
+  another thread without closing the socket underneath it, which 7.7 already records. The bound has
+  to come from somewhere the caller can wait **interruptibly**.
+  *Two routes, and they are not the same size.*
+  1. **A dedicated publisher thread with an internal queue** — `pika`'s own recommendation, already
+     rejected by 7.7 as machinery this scale does not justify. The request thread would wait on the
+     queue with a timeout instead of on the socket, and so be released on schedule. **It frees the
+     caller, not the resource:** the publisher thread stays stuck in the same call.
+  2. **FW12's asynchronous runtime** — the wait becomes an awaitable the event loop abandons at a
+     deadline, with nothing left behind. This closes it completely, and it is the second thing
+     FW12 buys the publisher after removing 7.7's lock.
+  *Why it is not in scope:* the failure it covers is a broker that accepts a connection and then
+  goes silent, which is distinct from the two 7.5 names — an unreachable broker and a stale
+  connection — and both of those the three parameters do bound. `Connection.Blocked`, the broker
+  announcing that it is stalled, is bounded too. What is left is silence without announcement.
+  Under 1.1's ceiling test no named DoD row degrades.
+  *What would trigger it:* taking FW12, which closes it as a side effect; or a broker that stops
+  being a container on the same Compose host, at which point a connection that establishes and then
+  stops answering is no longer exotic.

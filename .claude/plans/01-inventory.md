@@ -586,7 +586,7 @@ gap the assignment left. **Phase 2 does not end while any row is open.**
 | **Q13** | Ordering and concurrency guarantees are unstated. One worker or several? Must events for one order be processed in order? | 8.5, 8.9, F2 | **answered → A5** |
 | **Q14** | Idempotency of `PATCH` is unstated — setting a status to its current value: no-op, error, or re-publish? | 5.1, F3 | **answered → A3** |
 | **Q15** | Authentication and multi-tenancy are not mentioned at all. Presumed absent — confirm so it can be recorded. | 6.8 | **answered → A20** |
-| **Q16** | Does "3–4 automated tests" mean 3–4 scenarios or 3–4 test functions, and do permitted unit tests count against the ceiling? | 12.2, 12.6 | **answered → A17** (unit-test scope deliberately left open in 12.6) |
+| **Q16** | Does "3–4 automated tests" mean 3–4 scenarios or 3–4 test functions, and do permitted unit tests count against the ceiling? | 12.2, 12.6 | **answered → A17** |
 | **Q17** | Data persistence across runs is unstated — should a reviewer's second `docker compose up` see the previous run's data? | 11.7 | **answered → A19** |
 | **Q18** | The broker and database choices interact: transactional claiming is easier in one database, delayed retry is easier in one broker. They must be chosen as a pair, not independently. | 2.1, 2.2, 8.2, 8.9 | **answered → A1** |
 | **Q19** | The diagram shows "Interactive CLI / REST client" as alternatives. Must the CLI cover **all** operations, including status updates that the demo needs, or only the three named ones? | 9.2 | **answered → A18** |
