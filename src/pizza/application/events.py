@@ -1,7 +1,7 @@
-"""The ORDER_READY event: the message the API publishes and the worker consumes.
+"""The ORDER_READY event, published by the API and consumed by the worker.
 
-It carries identifiers only. The consumer must read the current order row regardless,
-because the state may have changed since the message was written.
+It carries identifiers only: consumers must read the current order row, since the
+state may have changed since the message was written.
 """
 
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ from uuid import UUID
 
 @dataclass(frozen=True)
 class OrderReadyEvent:
-    """The published fact that an order is ready for a driver."""
+    """Signals that an order is ready to be given a driver."""
 
     EVENT_TYPE: ClassVar[str] = "ORDER_READY"
 

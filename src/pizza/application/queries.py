@@ -1,7 +1,6 @@
-"""The read paths: no rules, no writes, no commit.
+"""Read paths: no rules, no writes, no commit.
 
-They return entities. The response shape — the nested driver, the field
-selection — is the API's, assembled by the adapter.
+They return entities; the response shape is assembled by the calling adapter.
 """
 
 from dataclasses import dataclass
@@ -20,9 +19,10 @@ class OrderDetail:
 
 
 def get_order(uow: UnitOfWork, order_id: UUID) -> OrderDetail:
-    """Fetch one order, and its driver when it has one.
+    """Fetch one order, with its driver when it has one.
 
-    Raises `OrderNotFound`.
+    Raises:
+        OrderNotFound: No order carries this identifier.
     """
     with uow:
         order = uow.orders.get(order_id)
@@ -35,7 +35,7 @@ def get_order(uow: UnitOfWork, order_id: UUID) -> OrderDetail:
 def list_orders(uow: UnitOfWork) -> list[Order]:
     """Fetch every order, newest first, without drivers.
 
-    One query rather than the N+1 a nested driver per row would cost.
+    Drivers are omitted to keep this a single query rather than one per row.
     """
     with uow:
         return uow.orders.list_all()

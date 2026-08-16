@@ -1,7 +1,7 @@
-"""The driver: who carries an order, and whether they are free to take one.
+"""Driver entity and its availability.
 
 A driver carries one order at a time. The link to that order is held on the
-order, not here, and a driver never mutates one.
+order, not here.
 """
 
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ from uuid import UUID
 
 
 class DriverStatus(Enum):
-    """Whether the driver can be given an order right now."""
+    """Whether the driver can be given an order."""
 
     AVAILABLE = "AVAILABLE"
     BUSY = "BUSY"
@@ -26,13 +26,13 @@ class Driver:
 
     @classmethod
     def new(cls, id: UUID, name: str, now: datetime) -> "Driver":
-        """Build a newly registered driver, available from the start."""
+        """Create a newly registered driver, available from the start."""
         return cls(id=id, name=name, status=DriverStatus.AVAILABLE, created_at=now)
 
     def mark_busy(self) -> None:
-        """Take the driver out of the pool for one order."""
+        """Take the driver out of the available pool."""
         self.status = DriverStatus.BUSY
 
     def release(self) -> None:
-        """Return the driver to the pool once the order is delivered."""
+        """Return the driver to the available pool."""
         self.status = DriverStatus.AVAILABLE

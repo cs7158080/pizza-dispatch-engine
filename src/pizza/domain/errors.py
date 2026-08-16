@@ -1,8 +1,7 @@
-"""Business errors: outcomes the rules refuse.
+"""Business errors raised when the domain rules refuse an operation.
 
-The API maps each to a status code; nothing here knows a code. Each message is
-the sentence the API answers with, written once and addressed to a person. An
-error describing a failed port lives beside that port, in `application/ports.py`.
+Each message is the text the API returns; the status code mapping lives in the
+API adapter. Errors raised by ports are defined in `application/ports.py`.
 """
 
 from __future__ import annotations

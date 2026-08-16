@@ -1,7 +1,4 @@
-"""The order: its fields, its status lifecycle, and what a transition reports.
-
-Identity and time arrive as arguments; the entity reaches for neither.
-"""
+"""Order entity, its status lifecycle, and its transition rules."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,7 +9,7 @@ from pizza.domain.errors import IllegalTransition
 
 
 class OrderStatus(Enum):
-    """The stages of an order, in the only sequence they may be reached."""
+    """Stages of an order, in the only sequence they may be reached."""
 
     RECEIVED = "RECEIVED"
     PREPARING = "PREPARING"
@@ -22,16 +19,15 @@ class OrderStatus(Enum):
 
 
 class AssignmentState(Enum):
-    """Whether a driver is coming, independently of how far the order has got."""
+    """Outcome of dispatch for an order, tracked separately from its status."""
 
-    PENDING = "PENDING"  # no driver yet, which is where every order starts
-    ASSIGNED = "ASSIGNED"  # a driver took it
-    COMPLETED = "COMPLETED"  # a driver took it and it was delivered
+    PENDING = "PENDING"  # no driver assigned yet; the initial state
+    ASSIGNED = "ASSIGNED"  # a driver took the order
+    COMPLETED = "COMPLETED"  # a driver took the order and it was delivered
     FAILED = "FAILED"  # no driver was found before the retries ran out
 
 
-# The whole legal graph: only the adjacent status is reachable. DELIVERED is
-# terminal because it is not a key here.
+# The complete set of legal transitions. DELIVERED is terminal: it has no entry.
 _NEXT = {
     OrderStatus.RECEIVED: OrderStatus.PREPARING,
     OrderStatus.PREPARING: OrderStatus.BAKING,
@@ -42,7 +38,7 @@ _NEXT = {
 
 @dataclass(frozen=True)
 class TransitionResult:
-    """What the caller must do after a successful transition."""
+    """Actions the caller must take after a successful transition."""
 
     must_publish: bool
     releases_driver: bool
@@ -55,8 +51,8 @@ class Order:
     address: str
     items: list[str]
     status: OrderStatus
-    # Two views of one dispatch: `driver_id` is who took the order and is never
-    # cleared, `assignment_state` is how that attempt ended.
+    # `driver_id` records who took the order and is never cleared;
+    # `assignment_state` records how that dispatch ended.
     assignment_state: AssignmentState
     driver_id: UUID | None
     assigned_at: datetime | None
@@ -71,9 +67,9 @@ class Order:
         items: list[str],
         now: datetime,
     ) -> "Order":
-        """Build a freshly placed order.
+        """Create a newly placed order, in RECEIVED status and PENDING dispatch.
 
-        Loading a stored one calls the dataclass constructor with all nine fields.
+        Stored orders are rebuilt through the dataclass constructor instead.
         """
         return cls(
             id=id,
@@ -88,15 +84,21 @@ class Order:
         )
 
     def advance_to(self, requested_status: OrderStatus) -> TransitionResult:
-        """Move the order one step forward, or raise `IllegalTransition`.
+        """Advance the order to the next status in its lifecycle.
 
-        Returns the two facts the caller must act on: whether to publish, and
-        whether to release the assigned driver.
+        Args:
+            requested_status: Must be the status immediately following the current one.
+
+        Returns:
+            Whether an event must be published and whether the driver is released.
+
+        Raises:
+            IllegalTransition: The requested status does not follow the current one.
         """
         if _NEXT.get(self.status) is not requested_status:
             raise IllegalTransition(self.status, requested_status)
         self.status = requested_status
-        # FAILED is the only record that dispatch gave up, so delivery leaves it.
+        # FAILED is the only record that dispatch gave up, so it is preserved.
         if (
             self.status is OrderStatus.DELIVERED
             and self.assignment_state is not AssignmentState.FAILED
@@ -108,25 +110,25 @@ class Order:
         )
 
     def can_be_assigned(self) -> bool:
-        """Report whether a driver may still be given to this order.
+        """Return whether the order may still be given a driver.
 
-        The second clause is not redundant: a retrying event can arrive after
-        delivery, and assigning then would mark a driver busy past the only
-        transition that ever releases them.
+        Delivered orders are excluded: a retried dispatch event arriving after
+        delivery would mark a driver busy past the only transition that
+        releases them.
         """
         return self.driver_id is None and self.status is not OrderStatus.DELIVERED
 
     def assign_to(self, driver_id: UUID, now: datetime) -> None:
-        """Record which driver took the order, and when.
+        """Record the driver that took the order and the time of assignment.
 
-        There is no guard here; the caller asks `can_be_assigned` first.
+        Unguarded: callers must check `can_be_assigned` first.
         """
         self.driver_id = driver_id
         self.assignment_state = AssignmentState.ASSIGNED
         self.assigned_at = now
 
     def mark_dispatch_failed(self) -> None:
-        """Record that no driver was found, unless the order has moved on."""
+        """Mark dispatch as failed, unless the order has since moved on."""
         if not self.can_be_assigned():
             return
         self.assignment_state = AssignmentState.FAILED
