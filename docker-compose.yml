@@ -1,6 +1,6 @@
 # No named volumes: postgres and rabbitmq write to their own container filesystems, so
 # `docker compose down` leaves nothing behind and the next `up` starts empty. The lines
-# that make the data survive are in README.md, under "Persistence".
+# that make the data survive are in README.md, under "Launch".
 
 services:
   postgres:
