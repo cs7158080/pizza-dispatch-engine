@@ -28,10 +28,10 @@ status markers, precisely so that this table cannot be contradicted.
 | 9 — CLI | 9.1–9.6 | — |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.1–11.11 | — |
-| 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.5, 12.8 |
+| 12 — Testing | 12.1–12.10 | — |
 | 13 — Documentation | 13.1–13.7 | — |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **109** | **3** |
+| **Total** | **112** | **0** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -111,6 +111,11 @@ and Part 4 of `03-roadmap.md`).
   driver at all. A scenario dedicated to release at `DELIVERED` would break it — and adding a
   trailing step to that scenario purely so the demo works is a test doing work for a non-test
   reason, which `CLAUDE.md` §5 forbids. If 12.1 chooses such a scenario, this item reopens.
+  **It did, and 12.5 answers the condition rather than reopening this item:** its suite-wide
+  invariant leaves the driver pool empty when the suite exits, so step 6 is unaffected and no step
+  below changes. 12.5 also narrows the sentence above — the trailing step it adds is required by
+  `CLAUDE.md` §5's order-independence, not by this path, which benefits from it without being its
+  reason.
   *What removes the silence, independently of the above:* the README states **both** outcomes of
   step 6 — if a driver is already available the assignment is immediate, and that is correct
   behaviour rather than a failure. A step that degrades legibly needs no guarantee behind it.
@@ -4183,10 +4188,15 @@ and Part 4 of `03-roadmap.md`).
   |---|---|
   | Retry budget exhausted, `assignment_state = FAILED` (F7 terminal) | a genuine risk, and the one tie the cost rule broke: 1.2's floor puts `TTL × cap` above 60 s and 11.6 gives the suite the shipped configuration, so it would add about a minute to **every** `docker compose up`. FW13 is where it becomes affordable |
   | Broker unreachable (F4), malformed message (F10) | 12.3 admits neither interface |
-  | Concurrent `PATCH` on one order (F14) | 6.9 is open — there is no decided behaviour to assert against |
+  | Concurrent `PATCH` on one order (F14) | 6.9 decided it, and the answer is a `409` — loud, by the criterion above. Asserting it also needs two genuinely simultaneous requests, so the test would turn on timing where §5 requires determinism |
   | Unknown order id (F1) | loud, and a single status code |
   | Database down mid-assignment (F5), worker crash before ack (F6) | both need process control; F6's partially-applied state is covered by 5.5's guard, which scenario 1 exercises |
   | The **ghost driver** (4.3) | the inventory flags it as a candidate, and it is not one: it is a **defect state, not a behaviour**. No sequence of legal calls produces it, so there is nothing for a test to drive. What is testable is that assignment writes both sides, which scenario 1 asserts |
+
+  *Corrected on 2026-08-16:* the F14 row read *"6.9 is open — there is no decided behaviour to
+  assert against"*. That was true when this item was written on 2026-08-10 and stopped being true
+  the next day, and the row was never revisited. The exclusion stands on the criterion above
+  instead, and the four scenarios are unchanged.
 
   *What this hands to 12.5, and it is a real problem rather than a formality:* scenario 1 ends
   with a released, `AVAILABLE` driver, while scenarios 2 and 3 both need scarcity. Run in that
@@ -4376,6 +4386,140 @@ and Part 4 of `03-roadmap.md`).
   *Source:* `CLAUDE.md` §5. *Constrained by:* 6.5, 6.6, 11.6, 11.7. *Constrains:* 2.6, 12.1,
   12.2, 12.4, 12.5. *Feeds:* 13.4.
 
+- **12.4 Waiting for the asynchronous assignment.** `[decided]`
+  *Decision:* **two helpers over `GET /orders/{id}` (12.3), and three constants.**
+  `wait_until(order_id, predicate)` polls until the predicate holds and returns the order payload,
+  so the test asserts on it without a second read; `stays(order_id, predicate)` polls across a
+  bounded window and fails on the **first** violation. **No test contains a bare sleep**; every wait
+  goes through one of the two. Their names are fixed here because the record uses them; their
+  placement is 12.7's, which puts both in `tests/integration/waiting.py`.
+
+  | Constant | Value | Where it comes from |
+  |---|---|---|
+  | Timeout, both helpers | **20 s** | 2.5 × 8.2's retry cycle |
+  | Observation window | **3 s** | one delivery, not one cycle — below |
+  | Poll interval | **0.25 s** | the cadence at which the condition is tested |
+
+  *Why the timeout is measured in retry cycles:* scenarios 2 and 3 wait for an assignment that
+  follows a **rejection**, so the message is sitting in 8.2's wait queue. Worst case it was
+  redelivered a moment before the driver became available, and the next delivery is a full
+  `PIZZA_DISPATCH_RETRY_DELAY_SECONDS` away — 8 s (10.4). A timeout under that colours the suite red
+  on a healthy system. One value serves every wait, including the fast ones: on success a generous
+  timeout costs nothing, since it is only ever measured on failure.
+
+  *Why the window is measured in deliveries, which is what makes it 3 s and not 12 s.* 7.5 publishes
+  inside the request after the commit, so the message is queued before the `PATCH` returns, and
+  8.5's single consumer takes it immediately — **the first delivery is not delayed; only
+  redeliveries are.** Each negative assertion 12.2 requires excludes a fault that would appear on
+  that first delivery:
+
+  | Window | Fault excluded | When it would appear |
+  |---|---|---|
+  | Scenario 1, after `READY` | 5.5's guard broken — a second driver claimed, or the assignment overwritten | first delivery of the second event |
+  | Scenario 2, at `BAKING` | an assignment invented with no driver available | first delivery |
+  | Scenario 3, the second order | the claim ignoring `status='AVAILABLE'` | first delivery |
+
+  A window covering a full retry cycle would observe the same code fail the same way again; it
+  exercises no further path. **The limit is stated rather than glossed:** a 3 s window can end
+  before a cold worker's first delivery, and the assertion then passes having tested nothing. A
+  longer window does not repair that — if the worker is not consuming, no window sees a delivery —
+  it buys more sampling chances, not a guarantee. In scenarios 1 and 3 an assignment moments earlier
+  in the same test has already proved the worker live, so only scenario 2's window is unbacked, and
+  12.2 already places that scenario's proof on the positive assertion after it rather than on the
+  window. Against that, 12.1 dropped a whole scenario for costing about a minute per launch; a 12 s
+  window costs nearly the same and adds no scenario.
+  **3 s is chosen inside a range, not computed.** It sits between the two timescales the system has
+  — sub-second local processing and the 8 s retry delay — far enough from both to be confused with
+  neither.
+
+  *Why `stays` is not the fixed sleep `CLAUDE.md` §5 forbids.* §5 forbids assuming the system is
+  ready after N seconds. Here the elapsed time is the **subject** of the assertion, not an
+  assumption about readiness: the helper tests a condition twelve times and fails at the earliest
+  moment a violation is visible, which a `sleep` followed by one read does not — it would also miss
+  a transient assignment later overwritten. 11.2 already made this argument for a healthcheck's
+  `interval` and `start_period`, *"the cadence at which a condition is tested"*. **This reads §5
+  rather than amending it**, which is the conclusion 12.6 reached for the unit set on its own
+  question.
+
+  *The three values are constants in the suite, not configuration.* 11.8's rule decides it — a value
+  becomes configuration when something outside our control can force it to differ, and nothing
+  forces these. 10.1 gives the suite `ClientSettings`, which holds `api_base_url` alone; adding the
+  retry delay to it would make the CLI supply a value it never reads, the exact cost 10.1 split the
+  two classes to avoid. *Reopen condition:* the timeout is derived from 10.4's 8 s, so a change to
+  that value — FW13 is the only one 10.4 admits — reopens this item. A reviewer who overrides
+  `PIZZA_DISPATCH_RETRY_DELAY_SECONDS` upward gets a red suite on a healthy system, which is outside
+  the envelope 11.6 supports, alongside a stack driven by hand.
+
+  *A timeout failure carries the last observed order payload*, not only the elapsed time. Without it
+  a red suite cannot distinguish an order stuck at `PENDING` from one that reached `FAILED` or was
+  assigned to an unexpected driver — three faults with three different causes.
+  *The suite measures real elapsed time* with `time.monotonic()`. 4.8's clock port exists so the
+  **core** does not depend on wall time; the suite is not the core, and elapsed time is precisely
+  what it is asserting about.
+  *What this costs the launch:* about 30 s on a healthy system — roughly 4 s for scenario 1
+  including 12.5's absorption, 11 s for scenario 2, 12 s for scenario 3, and nothing for scenario 4.
+
+  *Rejected:* **one helper with a flag** — the two fail for opposite reasons and a shared signature
+  hides it; **a fixed sleep before a single read** — above; **deriving the timeout from the
+  environment** — above; **a window covering a full retry cycle** — above.
+  *Source:* `CLAUDE.md` §5, R18. *Constrained by:* 7.5, 8.2, 8.5, 10.1, 10.4, 11.6, 12.2, 12.3.
+  *Constrains:* 12.5, 12.8. *Defers to:* 12.7 for placement. *Realised in:* U10.
+
+- **12.5 Test data strategy and isolation.** `[decided]`
+  *Decision:* **unique data per test on a clean start, and one invariant that makes execution order
+  irrelevant — every test leaves the driver pool exactly as it found it: empty.** 11.6 chose unique
+  data over truncation; this item supplies the half it could not cover, since unique data cannot
+  scope a pool that is global by nature.
+
+  *Why this is solvable inside the suite:* 11.7 declares no volumes, so every driver that exists
+  while the suite runs was registered by the suite itself. 12.1's problem is internal to four test
+  functions, and closable by a contract between them rather than by an interface 12.3 refuses.
+
+  | Scenario | Registers | Ends with that driver | Net `AVAILABLE` |
+  |---|---|---|---|
+  | **1** Complete order lifecycle | one, first | released — `AVAILABLE` (5.6) | **+1** |
+  | **2** Recovery when a driver registers | one, mid-test | `BUSY` | 0 |
+  | **3** One driver, two orders | one | `BUSY`, on the second order | 0 |
+  | **4** API rule enforcement | none | — | 0 |
+
+  Scenario 1 is the only producer, and produces exactly one — because 12.2 makes it the only
+  scenario that asserts a release.
+
+  *The invariant, enforced in one place:* after its final assertions, scenario 1 **absorbs its own
+  driver** — one further order, advanced to `BAKING` and waited on (12.4) until `ASSIGNED`. Every
+  scenario now begins and ends at zero, so any order, any `-k` subset and any repetition of the
+  suite meet the same precondition — and the invariant is verified by reading four tests. It lives
+  in a fixture that yields, so it runs even when an assertion fails partway and the cascade is
+  contained; **the cost** is that a failure after the driver became `BUSY` leaves the absorbing
+  order unassigned and ends at 12.4's timeout — noise on an already-red run, chosen over a silent
+  absorption that would leave a driver behind with nothing to report it.
+
+  *This answers 1.2's reopen condition rather than firing it.* The pool is empty when the suite
+  exits, so the demo's step 6 is unaffected and none of its thirteen steps changes. 1.2 also
+  pre-rejected a trailing step added *"purely so the demo works"*, and that sentence is **narrowed,
+  not contradicted**: `CLAUDE.md` §5 requires order-independence, so the suite would need the
+  absorption if this project had no demo path at all. The demo is its beneficiary, not its reason.
+
+  *Identification is by the id the API returned, never by a name.* No test reads `GET /orders` or
+  searches for its own rows — 4.5 imposes no uniqueness on names, so uniqueness could not have
+  carried correctness. The unique names are for legibility: each carries its test's name and a short
+  random suffix so a reviewer can attribute every row, and the absorbing order's name says what it
+  is. **No shared data fixtures** — a driver created once and reused would reintroduce the coupling
+  this item removes.
+  *One thing this adds to 11.6:* the suite becomes re-runnable against its own residue. 11.6's
+  stated condition is untouched — a driver a reviewer registers by hand still breaks scenarios 2
+  and 3.
+
+  *Rejected:* **truncation between tests** — 12.3 admits no database client, and it would not empty
+  the wait queue scenario 2 leaves occupied; **a separate test database, vhost or stack** — 11.6
+  weighed and declined it, and the invariant costs three HTTP calls against a doubled environment;
+  **fixing the execution order** so scenario 1 runs last — the cheapest thing that would work, and
+  it contradicts §5 in as many words; **a defensive fixture before every test** absorbing whatever
+  is available — with no driver-listing endpoint (6.6) it cannot detect availability, so it would
+  pay an observation window in all four tests to solve a problem that arises in one known place.
+  *Source:* `CLAUDE.md` §5. *Constrained by:* 11.6, 11.7, 12.1, 12.2, 12.3. *Constrains:* 12.4,
+  12.8. *Answers:* 1.2's reopen condition. *Realised in:* U10.
+
 - **12.6 Scope of the unit test set.** `[decided]`
   *Decision:* **no amendment to `CLAUDE.md` §5 — the set stays inside "free", and the rule is
   one of origin, not size.** A test belongs in `tests/unit/` when it runs with **no live
@@ -4446,6 +4590,38 @@ and Part 4 of `03-roadmap.md`).
   *Source:* `CLAUDE.md` §5. *Constrained by:* 11.9, 12.3, 12.4, 12.5, 14.7. *Constrains:* 12.9.
   *Realised in:* U10 for the two modules, U11 for the command 14.7 gains — the directories
   themselves have been on `main` since U1.
+
+- **12.8 Deterministic testing of the retry path.** `[decided]`
+  *Decision:* **the test controls the event that removes the scarcity, and nothing else.** It
+  withholds a driver, advances the order to `BAKING`, observes `PENDING` over 12.4's window, and
+  then supplies one — by registering a driver in scenario 2, by releasing one at `DELIVERED` in
+  scenario 3. No configuration is tuned, no clock is moved, and no broker interface is opened.
+
+  *What makes the retry observable at all over HTTP:* the transition from `PENDING` with
+  `driver: null` to `ASSIGNED`, **with no further `PATCH` sent** (12.2). Nothing but a redelivery of
+  the original message could have produced it, so the outcome is the evidence that the message
+  survived. 8.6 rules out the dispatch log line and 12.3 admits no broker client; neither is needed.
+
+  *Why this is deterministic rather than lucky — three properties, none of them timing:*
+
+  | What could otherwise flake | What removes it |
+  |---|---|
+  | The message is lost, so the assignment never comes | 8.2 — the wait queue has no consumer and a TTL; the message must return |
+  | A driver from elsewhere claims the order | 12.5's invariant — the pool is empty, so the driver the test registered is the only candidate |
+  | The registration misses the next delivery's window | There is no window to miss: any delivery after the registration finds the driver, and 12.4's timeout exceeds a full cycle, so it is always caught |
+
+  *The cadence is never asserted, only the outcome.* Asserting that the assignment took 8 s would
+  test 10.4's value instead of R9's behaviour, and would fail on a loaded machine. 12.4's timeout is
+  an upper bound, not an assertion.
+  *The waiting order cannot exhaust its budget first:* 8.3 allows 64 s (10.4), and both tests remove
+  the scarcity within seconds of creating it. This is the floor 1.2 set and 12.1 paid for.
+  *Both scenarios are one item* because the mechanism is identical; they differ only in what ends
+  the scarcity, which is why 12.2 keeps them apart as tests.
+  *Not covered, and stated:* budget exhaustion to `FAILED` — 12.1 ranked and dropped it, FW13 is its
+  home; and 7.4's `x-death` count, which no test observes. The suite sees that the message came
+  back, never how many times.
+  *Source:* R9, `CLAUDE.md` §5. *Constrained by:* 1.2, 8.2, 8.3, 10.4, 12.1, 12.2, 12.3.
+  *Consumes:* 12.4, 12.5. *Realised in:* U10.
 
 - **12.9 Where results are surfaced.** `[decided]`
   *Decision:* **console only, no report file** — and the `command` 11.9 left blank:
