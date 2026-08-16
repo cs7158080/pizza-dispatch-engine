@@ -1,8 +1,8 @@
-"""Waiting for what the API only shows once the worker has acted on a message.
+"""Polling helpers for state the API shows only after the worker acts on a message.
 
-Two helpers, because they fail for opposite reasons: one fails when a condition
-never arrives, the other when it stops holding before its window is out. Between
-them they are the only place the suite waits, so no test carries a sleep of its own.
+The two helpers fail for opposite reasons: one when a condition never arrives, the
+other when it stops holding before its window is out. They are the only place the
+suite waits, so no test carries a sleep of its own.
 """
 
 import time
@@ -11,12 +11,12 @@ from typing import Any
 
 import httpx
 
-# An assignment that follows a rejection waits for the message to come back from
-# the wait queue, and the next delivery can be a whole retry delay away.
+# Long enough for a retry: an assignment that follows a rejection waits for the
+# message to return from the wait queue, a whole retry delay away.
 TIMEOUT_SECONDS = 20.0
 
-# One delivery rather than one retry cycle: the first delivery is never delayed,
-# and every fault a negative assertion excludes would show up on it.
+# Covers one delivery rather than one retry cycle: the first delivery is never
+# delayed, and every fault a negative assertion excludes would appear on it.
 WINDOW_SECONDS = 3.0
 
 # The cadence at which the condition is tested.
@@ -38,9 +38,12 @@ def wait_until(
 ) -> dict[str, Any]:
     """Poll the order until the predicate holds, and return the order it held for.
 
-    A timeout reports the last order seen, not only the elapsed time: without it a
+    A timeout reports the last order seen alongside the elapsed time; without it a
     red suite cannot tell an order still waiting for a driver from one that gave up
-    or was assigned to a driver nobody expected.
+    or was assigned to an unexpected driver.
+
+    Raises:
+        AssertionError: The predicate did not hold within `TIMEOUT_SECONDS`.
     """
     deadline = time.monotonic() + TIMEOUT_SECONDS
     order = read_order(client, order_id)
@@ -55,12 +58,13 @@ def wait_until(
 
 
 def stays(client: httpx.Client, order_id: str, predicate: Predicate) -> None:
-    """Fail at the first moment the predicate stops holding inside the window.
+    """Assert the predicate holds throughout the window, failing at the first breach.
 
-    The elapsed time is what is being asserted about, not an assumption that the
-    system is ready by then: the condition is tested repeatedly and the earliest
-    violation is the failure. One read after a sleep would miss a state that
-    appeared and was overwritten in between.
+    The condition is tested repeatedly rather than once at the end: a single read
+    after a sleep would miss a state that appeared and was overwritten in between.
+
+    Raises:
+        AssertionError: The predicate stopped holding within `WINDOW_SECONDS`.
     """
     deadline = time.monotonic() + WINDOW_SECONDS
     while time.monotonic() < deadline:

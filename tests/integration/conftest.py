@@ -1,8 +1,8 @@
-"""What every scenario is given: a client, and a name that collides with nothing.
+"""Fixtures shared by the integration scenarios: an HTTP client and unique names.
 
-The suite speaks HTTP and nothing else, so the client is the only fixture
-holding state. Names exist for the person reading the data afterwards, never for a
-test to search by — every test identifies its rows by the id the API returned.
+The suite speaks HTTP and nothing else, so the client is the only fixture holding
+state. Names exist for whoever reads the data afterwards; tests identify their rows
+by the id the API returned, never by name.
 """
 
 import os
@@ -19,11 +19,11 @@ from .waiting import wait_until
 
 @pytest.fixture(scope="session")
 def client() -> Iterator[httpx.Client]:
-    """One connection pool for the whole run, aimed at the configured API.
+    """Open one connection pool for the whole run, aimed at the configured API.
 
-    The base URL comes from the environment rather than a literal, so the same
-    suite runs from the host against the published port and from inside the
-    network against the service name.
+    The base URL comes from the environment rather than a literal, so the same suite
+    runs from the host against the published port and from inside the network against
+    the service name.
     """
     settings = load_client_settings(os.environ)
     with httpx.Client(base_url=settings.api_base_url) as opened:
@@ -32,7 +32,7 @@ def client() -> Iterator[httpx.Client]:
 
 @pytest.fixture
 def unique_name(request: pytest.FixtureRequest) -> Callable[[str], str]:
-    """Builds a name that says which test created the row, and repeats never."""
+    """Build names that identify the test which created the row, and never repeat."""
 
     def make(label: str) -> str:
         return f"{request.node.name}-{label}-{uuid4().hex[:8]}"
@@ -44,16 +44,15 @@ def unique_name(request: pytest.FixtureRequest) -> Callable[[str], str]:
 def absorbs_its_driver(
     client: httpx.Client, unique_name: Callable[[str], str]
 ) -> Iterator[None]:
-    """Leaves the driver pool exactly as the test found it: empty.
+    """Consume the driver the test released, leaving the pool empty as it was found.
 
-    Only one scenario ends with a driver back in the pool, so only one has to take
-    it out again. With this in place every test begins and ends at zero available
-    drivers, which is what lets them run in any order, as any subset, and twice.
+    Only one scenario ends with a driver back in the pool, so only one has to take it
+    out again. Every test then begins and ends at zero available drivers, which is
+    what lets them run in any order, as any subset, and twice.
 
-    It yields, so the absorption also happens when the test fails partway. A
-    failure after the driver became busy leaves this order unassigned and ends at
-    the waiting timeout — noise on a run that is already red, which is the price of
-    never silently leaving a driver behind.
+    The teardown runs after a failure too. A failure that leaves the driver busy makes
+    this order wait for the full timeout: noise on an already red run, accepted so
+    that a driver is never left behind silently.
     """
     yield
 
