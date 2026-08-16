@@ -10,7 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # The package itself; its dependencies are already installed and pinned above.
-# The build tree goes with it: a second copy of the source that nothing imports.
+# `build` is removed: it is a duplicate copy of the source that nothing imports.
 COPY pyproject.toml .
 COPY src/ ./src/
 RUN pip install --no-cache-dir --no-deps . && rm -rf build

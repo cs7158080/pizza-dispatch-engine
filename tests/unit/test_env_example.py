@@ -1,8 +1,7 @@
-"""`.env.example` against the settings classes.
+"""Unit test comparing `.env.example` with the settings classes.
 
-The configuration surface is written in two places — the field lists in
-`pizza.config` and the committed example — and two copies of one fact
-eventually disagree. This test is what keeps them from drifting.
+The configuration surface is written twice: the field lists in `pizza.config` and the
+committed example. This test keeps the two from drifting apart.
 """
 
 import re
@@ -15,14 +14,13 @@ _PREFIXED = re.compile(r"PIZZA_[A-Z_]+")
 
 
 def test_env_example_matches_the_settings_classes() -> None:
-    """Every variable the code reads appears in the example, and nothing else.
+    """Scenario: the example documents every declared variable, and nothing more.
 
-    The comparison runs in both directions on purpose, because each direction is
-    a different failure. A field renamed in `config.py` and not in the file
-    leaves a reviewer copying an example that no longer works; a variable
-    documented that nothing reads sends them to set something with no effect.
-    Comment lines count as documentation, which is how the two URLs Compose
-    assembles are covered without a settable line.
+    Why it matters: the comparison runs in both directions because each direction is
+    a different failure. A field renamed only in `config.py` leaves a reviewer copying
+    an example that no longer works; a documented variable nothing reads sends them to
+    set something with no effect. Comment lines count as documentation, which is how
+    the two URLs Compose assembles are covered without a settable line.
     """
     documented = set(_PREFIXED.findall(_EXAMPLE.read_text(encoding="utf-8")))
     declared = {

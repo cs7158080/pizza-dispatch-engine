@@ -1,7 +1,7 @@
-"""The wire format: what survives a round trip, and what is refused.
+"""Unit tests for the event wire format: what round-trips, and what is refused.
 
 The same bytes are published to the broker and stored in the outbox row, so a fault
-here is a fault in both copies at once.
+here affects both copies at once.
 """
 
 import json
@@ -27,11 +27,11 @@ def _an_event() -> OrderReadyEvent:
 
 
 def test_an_event_survives_the_round_trip() -> None:
-    """Identifiers and the instant come back as themselves, not as strings.
+    """Scenario: an event round-trips with its identifiers and instant intact.
 
-    The consumer reads the order by this identifier and nothing else identifies it. A
-    UUID returning as text, or a timestamp losing its offset, would arrive as a
-    well-formed message that fails further in, where the cause is no longer visible.
+    Why it matters: the consumer finds the order by this identifier alone. A UUID
+    returning as text, or a timestamp losing its offset, produces a well-formed
+    message that fails further in, where the cause is no longer visible.
     """
     event = _an_event()
 
@@ -44,11 +44,10 @@ def test_an_event_survives_the_round_trip() -> None:
 
 
 def test_a_message_with_an_unknown_field_still_parses() -> None:
-    """A field added by one side does not break the other.
+    """Scenario: a message carrying an unknown field still parses.
 
-    The tolerant reader is what stands in for a version marker: without it, adding a
-    field becomes a coordinated deployment, and the design has no moment at which the
-    two sides can be coordinated.
+    Why it matters: the tolerant reader stands in for a version marker. Without it,
+    adding a field would require deploying both sides together.
     """
     event = _an_event()
     document = json.loads(serialize(event).decode("utf-8"))
@@ -60,11 +59,11 @@ def test_a_message_with_an_unknown_field_still_parses() -> None:
 
 
 def test_malformed_input_raises_one_kind_of_error() -> None:
-    """Every way of being wrong arrives as `SerializationError`.
+    """Scenario: every kind of malformed input raises `SerializationError`.
 
-    The consumer's poison-message path catches one family of error. A
-    `UnicodeDecodeError` or a `KeyError` escaping this module would reach it as an
-    unhandled exception and take the worker down instead of the message.
+    Why it matters: the consumer's poison-message path catches that one family of
+    error. A `UnicodeDecodeError` or a `KeyError` escaping this module would reach it
+    unhandled and take the worker down instead of the message.
     """
     identifier = "6f1e1f7c-4c33-4f7a-9a1e-6d3d1f0d2a11"
     complete = {

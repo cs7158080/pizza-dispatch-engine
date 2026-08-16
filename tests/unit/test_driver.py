@@ -1,4 +1,4 @@
-"""The driver's side of release, proved against the entity alone."""
+"""Unit test for driver availability, exercised against the entity alone."""
 
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -9,13 +9,12 @@ _NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
 
 def test_a_registered_driver_starts_available_and_returns_to_it() -> None:
-    """The pool must refill, which is the whole reason release exists.
+    """Scenario: a driver starts available, becomes busy, and returns to available.
 
-    Without it the driver pool is consumed once and never refilled: after as many orders
-    as there are drivers, every later order sits in the no-driver retry path forever. A
-    `new()` starting BUSY, or these two methods written the wrong way round, produce the
-    same thing — a demo that stops working on the second order while every part of the
-    system reports success.
+    Why it matters: without the return the pool is consumed once and never refilled,
+    and every order past the driver count waits in the retry path forever. A `new()`
+    that started BUSY, or these two methods swapped, produce the same failure while
+    every component still reports success.
     """
     driver = Driver.new(id=uuid4(), name="Noa", now=_NOW)
 
