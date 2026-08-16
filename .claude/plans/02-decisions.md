@@ -27,11 +27,11 @@ status markers, precisely so that this table cannot be contradicted.
 | 8 — Worker | 8.1–8.9 | — |
 | 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
 | 10 — Configuration | 10.1–10.5 | — |
-| 11 — Docker Compose | 11.3–11.7 | 11.1, 11.2, 11.8–11.11 |
-| 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7 | 12.4, 12.5, 12.8–12.10 |
+| 11 — Docker Compose | 11.1–11.11 | — |
+| 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.5, 12.8 |
 | 13 — Documentation | 13.1–13.6 | — |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **97** | **14** |
+| **Total** | **105** | **6** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -3256,9 +3256,10 @@ and Part 4 of `03-roadmap.md`).
   carries `required: false`, which needs Compose 2.24 — and 11.10 has not fixed a version floor.
   Interpolation buys the same override surface with no version requirement at all.
 
-  *`.env.example` carries ten active `NAME=value` lines* — 10.5's five vendor variables, 10.4's four
-  tunables, and `PIZZA_API_BASE_URL` — each with the value Compose defaults to, so the file is a
-  complete and valid environment. `PIZZA_DATABASE_URL` and `PIZZA_BROKER_URL` appear in **one prose
+  *`.env.example` carries eleven active `NAME=value` lines* — 10.5's five vendor variables, 10.4's
+  four tunables, `PIZZA_API_BASE_URL`, and 11.8's `API_HOST_PORT` — each with the value Compose
+  defaults to, so the file is a complete and valid environment. **This read "ten" until 11.8 closed**,
+  which is the Compose-only variable 10.1 pre-authorised this item to gain. `PIZZA_DATABASE_URL` and `PIZZA_BROKER_URL` appear in **one prose
   comment** naming both and stating that Compose assembles them from the values above, so setting
   them in the file has no effect.
   *Rejected — writing those two as commented `# NAME=value` lines.* In an env file that form reads
@@ -3351,6 +3352,222 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 11 — Docker Compose
 
+- **11.1 Service inventory.** `[decided]`
+  *Decision:* **seven services, and not one of their names is chosen here.**
+
+  | Service | Image | Named by |
+  |---|---|---|
+  | `postgres` | `postgres:16` | 2.2; the name by 10.1's `@postgres:5432` |
+  | `rabbitmq` | `rabbitmq:3.13` | 2.1; the name by 10.1's `@rabbitmq:5672` |
+  | `schema` | `pizza-runtime`, one-shot | 4.6, which writes both the service and its name |
+  | `api` | `pizza-runtime` | 3.7; the name by 10.1's `http://api:8000` |
+  | `worker` | `pizza-runtime` | 3.7; the name by 4.6's diagram |
+  | `tests` | `pizza-test` (`target: test`) | 3.7, 11.3; the name by 11.4's `--exit-code-from tests` |
+  | `cli` | `pizza-runtime`, `profiles: ["cli"]` | 9.3, which writes `docker compose run --rm cli` |
+
+  *Every name in the third column is already load-bearing somewhere else* — inside a URL our code
+  parses, or inside a command the README hands a reviewer. This item transcribes them; renaming
+  one is a change to the record that fixed it, not to this one.
+  *The list is closed at seven.* The inventory's "any init/migration service" is one slot and 4.6
+  filled it. FW2's relay would be the eighth and is not built.
+
+  **Six of the seven are written by U9; `tests` is written by U11, and the split is the record's
+  own rather than a convenience.** 12.9 fixes that service's `command` and carries *Realised in:*
+  U11; 12.7 gives its `conftest.py` to U10; and 11.3, 11.4 and 11.5 — everything the service is
+  for — are U11's *Decided by* list. A `tests` service written here would therefore run `pytest`
+  against an empty package, which exits `5`, until two later units filled it. **What U9 owns is the
+  list and its shape; what U11 adds is one service into a file that already defines the other
+  six**, together with its two edges in 11.2's graph.
+
+  *The two vendor tags — a convention, and the pin is not.* **This item left both unwritten when it
+  first closed**, which would have left U9's Phase 3 plan to invent them, and `CLAUDE.md` §2 forbids a
+  plan that contains a decision. Nothing in the design distinguishes recent majors: 8.9's
+  `SKIP LOCKED` and every constraint in 4.5 have been PostgreSQL features for a decade, and 7.1's
+  direct exchanges, dead-lettering and `x-message-ttl` as long in RabbitMQ. So 1.3 gives the choice
+  one line rather than a rationale assembled after the fact, exactly as 2.9 did between Python 3.12
+  and 3.13. **What is decided is the `major.minor` pin itself:** `latest` would hand a reviewer
+  building two months from now a different version from the one this was built against, and 7.1
+  already records the shape that failure takes — an argument change on an existing queue fails with
+  `PRECONDITION_FAILED` (406) and closes the channel. Conservative rather than newest, on 2.9's stated
+  ground that a four-day deliverable does not spend risk on a release it needs nothing from.
+
+  **The build arrangement, which 3.7 handed here in one sentence** — *"where the image is tagged so
+  four services do not build four times, and the `build`/`target` keys themselves — 11.1"*. **Every
+  service that runs our code carries both its own `build:` block and an explicit `image:` tag**, and
+  there are two tags across the five:
+
+  ```yaml
+  api     { build: {context: ., target: runtime}, image: pizza-runtime }
+  worker  { build: {context: ., target: runtime}, image: pizza-runtime }
+  schema  { build: {context: ., target: runtime}, image: pizza-runtime }
+  cli     { build: {context: ., target: runtime}, image: pizza-runtime }
+  tests   { build: {context: ., target: test},    image: pizza-test    }
+  ```
+
+  The shared tag is what makes "one image" a fact rather than an expectation; the repeated `build:`
+  is what makes every service buildable on its own.
+
+  *Rejected — one service declaring `build:` and the rest naming the tag alone.* Four lines shorter,
+  and it breaks a command the README promises. A service carrying `image:` without `build:` whose
+  image is not on the machine sends Docker to a registry, and `pizza-runtime` is in none. 9.3 hands
+  the reviewer `docker compose run --rm cli`; on a clean clone before the first `up` — which is when
+  somebody reads a README in order — that fails on a failed pull instead of starting the CLI.
+  *Rejected — a YAML anchor* (`x-runtime: &runtime`) folding the repetition away. It would merge
+  four lines into services that already differ in `command`, `environment`, `depends_on`, `restart`
+  and `profiles`, compressing the smallest part of each at the cost of one indirection before a
+  reader knows what a service actually is.
+  **`attach: false` on `postgres` and `rabbitmq`**, which 9.3 left open here and **1.2 had already
+  fixed** — its *Constrains* line reads *"`attach: false` on postgres and rabbitmq, so terminal 1
+  carries api, worker and tests only"*. The demo path is thirteen steps across two terminals, and at
+  steps 6 and 8 the reviewer is told to watch terminal 1 for the worker's "no driver" warning and its
+  dispatch line. Those are the worker's own lines, and vendor startup noise is what buries them.
+  *What it does not cost, because the objection is the obvious one:* the logs are still collected —
+  `attach: false` removes a service from the `up` stream, not from `docker compose logs postgres`. A
+  stack that fails to come up is diagnosed with the same command either way.
+  *Assumption:* `attach:` requires a Compose version floor, as 9.3 assumed for `profiles`; **11.10
+  confirms it**.
+  *Rejected — a declared network.* Compose's default network already resolves a service by its name,
+  which is what 10.1's three URLs assume. Declaring one adds lines and changes no behaviour.
+
+  *What this item does not own:* `depends_on`, its conditions, and every healthcheck — 11.2.
+  Published ports — 11.8. `restart` — 11.11. The `command` each service runs, including the
+  exec-form requirement 8.8 hands on — 11.9, so that one form is fixed in one place. The
+  `environment:` blocks are none of these: they transcribe 10.1's table, which 10.3 already left to
+  U9 by name.
+  *Source:* R14, R15. *Constrained by:* 1.2, 2.1, 2.2, 3.7, 4.6, 9.3, 10.1, 10.3, 11.3, 11.4, 12.9.
+  *Constrains:* 11.2, 11.9, 11.10. *Realised in:* U9 for six services, U11 for `tests`.
+
+- **11.2 Readiness and ordering.** `[decided]`
+  *Decision:* **Compose conditions alone. Nothing under `src/` waits for anything.** The inventory
+  offers healthchecks, in-app retry loops, or both; three records had already answered in three
+  places without anyone stating the rule — 9.6 writes no entrypoint script, 4.6's one-shot does not
+  wait because it is not started, and 8.8's worker exits rather than retrying. It is one rule and it
+  is written here: **readiness is a condition Compose evaluates, never a loop of ours.** 2.5's
+  `pool_pre_ping` is not an exception and that record says so — it replaces a connection that went
+  bad while idle, which is a different problem from starting up.
+
+  **Three healthchecks, on the infrastructure and the API.**
+
+  | Service | Test | Why this one |
+  |---|---|---|
+  | `postgres` | `pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"` | 6.6 named `pg_isready`; the `-h` is this item's |
+  | `rabbitmq` | `rabbitmq-diagnostics ping` | 6.6 |
+  | `api` | `python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"` | 6.6's `/health`, called with what is already in the image |
+
+  *Why `-h 127.0.0.1`, which is the finest detail in this item and the one that would have bitten.*
+  The postgres image runs a **temporary server during first initialisation**, started with no
+  external listener, and `pg_isready` reaching it over the local socket reports success. The
+  container would be marked healthy while the real server is not yet accepting connections — and
+  4.6's entire arrangement rests on the opposite, since the schema service connects over TCP from
+  another container and 4.6 gives it nothing to retry with. Forcing the check through TCP means it
+  answers the question the dependent service is actually asking. The user and database come from the
+  container's own environment (10.1), so a reviewer who overrides them does not break the check;
+  `$$` is Compose's escape for a literal `$`.
+  *Why the API's check is a `python -c` and not `curl`:* the base is `python:3.x-slim` (3.7), which
+  ships no `curl`. The alternative is a package in the image every service ships, added for a
+  diagnostic — against one line using the interpreter that is already the reason the image exists.
+  `urlopen` raises on 6.6's `503`, so the exit code needs no logic of ours.
+  *No healthcheck on `worker`* — 8.8 records that it speaks no HTTP and offers nothing to probe, and
+  a check invented for it would be a mechanism with one caller. *None on `schema` or `tests`* —
+  both are one-shot, and their readiness signal is the exit code.
+
+  **The graph.**
+
+  ```
+  postgres ──healthy──> schema ──completed 0──> api
+                                          └───> worker
+  rabbitmq ──healthy───────────────────────────> worker
+           └──healthy──────────────────────────> tests
+  api      ──healthy───────────────────────────> tests
+           └──healthy──────────────────────────> cli
+  ```
+
+  *The worker waits for the broker, which 8.8 handed here as legibility to be weighed.* Taken: the
+  restarts it prevents are not hypothetical — RabbitMQ takes tens of seconds to boot, and without
+  the edge the reviewer's **first** `up` prints a run of `ERROR` lines and a container with a restart
+  count, in the same stream 11.3 puts the PASS/FAIL summary in. That is the reasoning 11.7 already
+  used about a red suite at launch: the worst first impression is the one hardest to attribute
+  correctly. **It replaces nothing that 8.8 decided.** `depends_on` gates startup only, so a broker
+  that dies later is still answered by the exit and 11.11's policy, exactly as 8.8 specified — the
+  edge buys a clean first launch and gives up no resilience.
+  *The API does not wait for the broker, and the asymmetry is the design's own.* 7.1 declares the
+  topology from both sides precisely because that *"deletes the startup-ordering dependency rather
+  than managing it"*, and 6.6 made `/health` report the database alone on 7.6's ground that an API
+  without a broker serves every endpoint correctly. An edge here would contradict two records to buy
+  nothing, since everything that reads a dispatch result waits for the broker on its own account.
+  *The suite waits for the broker, and this is the edge that prevents a silent failure rather than
+  noise.* A22 is explicit: with the broker unreachable a `PATCH` still returns `200` and the event is
+  lost. A scenario running in that window would see a success, assert nothing wrong, and then fail
+  waiting for an assignment that was never requested — a red suite on a healthy system, reported at
+  the wrong place entirely.
+  *The suite does not wait for the worker, and nothing is lost by it.* The worker has no healthcheck
+  to wait on, and `service_started` would prove only that a process exists, not that it subscribed.
+  It is not needed: 7.1 has the publisher declare the topology, so the queue exists when the API
+  publishes, and a message published before the worker subscribes waits in it.
+  *`tests` carries no direct edge to `schema`, though 4.6's diagram draws one.* The guarantee holds
+  transitively — `tests` waits on `api`, which cannot be healthy before it started, and it cannot
+  start before `schema` exited zero. What 4.6 requires is preserved; the redundant edge is a second
+  statement of it that could later disagree.
+  *`cli` waits on the API* (9.3 left `depends_on` here), so `docker compose run --rm cli` works
+  whether or not the stack is already up.
+  **The graph is decided whole here and written in two parts**, because 11.1 gives the `tests`
+  service to U11: its two edges arrive with it, and the rest of the graph is U9's. Nothing about
+  them is left to that unit to decide — they are stated above with their reasons, and U11
+  transcribes them.
+
+  **The intervals.**
+
+  | | `interval` | `timeout` | `retries` | `start_period` |
+  |---|---|---|---|---|
+  | `postgres` | 5s | 5s | 12 | 10s |
+  | `rabbitmq` | 5s | 10s | 12 | 30s |
+  | `api` | 5s | 5s | 12 | 10s |
+
+  RabbitMQ gets the longer pair because `rabbitmq-diagnostics` starts an Erlang CLI, which is slow
+  both to boot and to answer. **None of these is the fixed wait `CLAUDE.md` §5 forbids:** each is the
+  cadence at which a condition is tested, and `start_period` is a window in which failures are not
+  counted — neither is an assumption that the system is ready after N seconds. Compose starts
+  everything the graph allows in parallel, so the waits overlap rather than sum.
+
+  **The api's 5 s covers its probe, and this is the hand-off U7 left open rather than a margin
+  chosen by feel.** U7 measured `database_reachable` answering `False` only after 130 seconds
+  against a database refusing the connection, on Windows, and handed the number here as the first
+  unit that could observe it on Linux. **Measured on Linux containers, it does not reproduce**, with
+  the pinned `psycopg` and the engine the api actually builds:
+
+  | State the probe meets | Answers | After |
+  |---|---|---|
+  | postgres up and serving | `True` | 0.01 s |
+  | the container stopped | `False` | 3.84 s |
+  | postgres still initialising | `False` | 0.00 s, turning `True` at 1.57 s |
+  | an address on the network with nothing on it | `False` | 3.14 s |
+  | an off-network address dropping `SYN` in silence | `False` | 21.05 s |
+
+  The first four are every failure state Compose has, and 5 s clears all of them. **No connect
+  timeout is added, and 10.4 gains no value** — the hand-off named one only if the delay held.
+  *The margin is thin and stated so nobody widens it by reflex:* the worst real case is about 4 s
+  once the HTTP round trip is added. It changes no behaviour, because a check killed at its
+  `timeout` is recorded as a failure, which is the same answer a slow `503` gives.
+  *Revisit if the database stops being a container on this network* (3.8's condition). The bound
+  above is the network's — an address that refuses or is unreachable answers at once, and only the
+  last row, which Compose cannot produce, is slow enough to matter.
+
+  **No `stop_grace_period` is written, for any service.** 8.8 handed it here and fixes that the
+  worker stops after the message in hand, which takes milliseconds — so the default is never reached
+  and a value here would be a number nothing derives. `stop_signal` on `postgres` is left alone on
+  the same ground: a slower shutdown costs a few seconds at `down`, and 11.7 discards the data
+  regardless.
+
+  *Rejected:* **an in-app wait loop** in any service — 9.6 already removed the entrypoint script that
+  would carry it, and it would put startup ordering in two places. **A healthcheck on the worker** —
+  no surface to probe. **`pg_isready` without `-h`** — above. **`curl` in the runtime image** —
+  above. **A direct `tests` → `schema` edge** — above.
+  *Assumption:* long-form `depends_on` conditions require Compose v2, as 9.3 assumed for `profiles`;
+  **11.10 confirms it**.
+  *Source:* R14, R15, `CLAUDE.md` §5. *Constrained by:* 2.5, 4.6, 6.6, 7.1, 7.6, 8.8, 9.3, 9.6,
+  10.1, 11.3, 11.7. *Holds:* 8.8's three hand-offs, and U7's on the probe. *Constrains:* 11.10,
+  11.11. *Realised in:* U9, except the two `tests` edges, which land with the service in U11.
+
 - **11.3 How the test suite is auto-executed.** `[decided]`
   *Decision:* a **one-shot test service** in compose that waits for the stack to be healthy
   (11.2), runs the suite, prints an unmissable PASS/FAIL summary to the `docker compose up`
@@ -3427,6 +3644,260 @@ and Part 4 of `03-roadmap.md`).
   *This is what keeps A8 valid:* 11.6 accepted conditional determinism on the promise of a
   clean start. Without persistence, that promise costs one documented command.
   *Source:* R15, `CLAUDE.md` §5, §6. *Answers:* Q17.
+
+- **11.8 Published host ports.** `[decided]`
+  *Decision:* **one published port, the API's, and it is variable on the host side:**
+  `${API_HOST_PORT:-8000}:8000`. Nothing else is published.
+
+  *The question this item was written for no longer exists, and saying so is half the record.* The
+  inventory ties this to "host-side CLI use (9.3)"; 9.3 then put the CLI in a container and recorded
+  that 11.8 is *"now free of any CLI dependency"*, 12.3 keeps the suite inside one too, and 1.2
+  removes the last two demand-side reasons by name — `/docs` is out of the demo path because *"the
+  demo stays one tool"*, and the broker-down path, which *"needs psql or a published port"*, goes to
+  13.4's documented trade-offs *"where it costs nothing and reopens no item"*. **Every named consumer
+  therefore works with no port published at all.** What follows is decided on top of that, not
+  against it.
+
+  *Why the API's port is published anyway.* 2.3 chose FastAPI partly on a claim it made in writing —
+  the generated OpenAPI document is *"a free, always-accurate statement of the contract in topic 6,
+  which a reviewer can read without reading code"*. Unpublished, that claim is not true of the
+  delivered system. 1.2 excluded `/docs` from the **demo path**, which is a different statement from
+  excluding it from existence: the path stays one tool, and the door exists for a reviewer who wants
+  more than the menu. It costs one line and carries no credential.
+
+  *Why the host side is a variable and the container side is not.* 10.4 fixed `8000` inside the
+  image as a constant, and 10.1 pre-authorised *"one Compose-only variable if 11.8 chooses a variable
+  host port — which our code never reads"*. The asymmetry has a rule under it: **a value becomes
+  configuration when something outside our control can force it to differ.** Inside the network
+  nothing can — each container has its own namespace, so `8000` collides with nothing, and the value
+  is transcribed in three of our own places (the API's command, 10.1's `http://api:8000`, and 11.2's
+  healthcheck) where a variable would be one fact in three copies. On the host something can: 8000 is
+  heavily used on development machines, and a reviewer who has it must otherwise edit the file we
+  handed them.
+  *`API_HOST_PORT` carries no `PIZZA_` prefix*, by 10.1's own naming rule — the prefix marks what our
+  code reads, and nothing reads this. It therefore also sits outside 10.3's drift test, exactly as the
+  five vendor variables do. *This item amends 10.3*, whose count of active `.env.example` lines moves
+  from ten to eleven.
+
+  *`5432` is not published, and this is the check 10.5 asked for by name.* 10.5 rests its "these are
+  not secrets" assertion on two legs — a disposable environment (A19) **and** no published port
+  carrying the credentials — and names publishing `5432` as what breaks the second. Nothing needs it:
+  12.3 gives the suite no database client at all, and 1.2 already moved the one path that wanted it
+  into 13.4. **10.5 is therefore not reopened, and both of its legs stand.**
+  *Rejected — `5672`.* Nothing on the host speaks AMQP.
+  *Rejected — `15672`, the management UI.* The tempting one, since it would show the wait queue
+  holding a message. 11.1's `attach: false` is what makes it redundant: 1.2 has the reviewer watch
+  terminal 1 at steps 6 and 8 for the worker's "no driver" warning and its dispatch line, so the retry
+  cycle is already demonstrated by the mechanism 1.2 chose. It would also force the management variant
+  of the vendor image, and under 1.1's ceiling test no named DoD row fails without it.
+  *Rejected — a fixed `8000:8000`* — it makes the one collision we cannot prevent unfixable without
+  editing a delivered file; *an ephemeral host port* — the README could then name no URL.
+  *Source:* R14, R19. *Constrained by:* 1.1, 1.2, 2.3, 9.3, 10.1, 10.3, 10.4, 10.5, 11.1, 12.3.
+  *Amends:* 10.3's line count. *Confirms:* 10.5 stays closed. *Realised in:* U9.
+
+- **11.9 Image build strategy.** `[decided]`
+  *Decision:* **one `Dockerfile`, base `python:3.12-slim`, pinned by tag; two stages; two installs;
+  and no build step before `up`.** 3.7 fixed the shape and 2.9 handed over the rest in one line —
+  *"the base image is a `python:3.12` family, and layer ordering is 11.9's"*.
+
+  ```dockerfile
+  FROM python:3.12-slim AS runtime
+
+  ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+  RUN adduser --system --group app && mkdir -p /app && chown app:app /app
+  WORKDIR /app
+
+  # Dependencies before source: editing code must not reinstall them.
+  COPY requirements.txt .
+  RUN pip install --no-cache-dir -r requirements.txt
+
+  # The package itself; its dependencies are already installed and pinned above.
+  COPY pyproject.toml .
+  COPY src/ ./src/
+  RUN pip install --no-cache-dir --no-deps .
+
+  USER app
+  CMD ["uvicorn", "pizza.entrypoints.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+  FROM runtime AS test
+
+  USER root
+  COPY requirements-dev.txt .
+  RUN pip install --no-cache-dir -r requirements-dev.txt
+  COPY --chown=app:app tests/ ./tests/
+  USER app
+  ```
+
+  **The file carries the two purpose comments above and nothing else.** `CLAUDE.md` §6 rejects item
+  numbers in source; the mapping from each line to the record that fixed it lives here.
+
+  *Two things 2.9's four-line sketch omits, and without either the build does not do what it says.*
+  `pip install --no-deps .` builds our package and therefore needs `pyproject.toml` in the context,
+  which that sketch copies only `src/` for. And **the non-root switch has one correct position**:
+  after both installs, because `pip` writes into root-owned `site-packages`. The `test` stage
+  inherits `USER app` from `runtime` and must return to root to install the dev group — a build-time
+  state that ends before the stage does, so the test container runs non-root like every other.
+  *Rejected — installing the dev group before dropping the user in `runtime`:* it would put `pytest`,
+  `ruff` and `mypy` in the image the API runs, which is the one thing 3.7 split the stages to
+  prevent. *Rejected — `pip install --user`:* `app` is a system account with no home, and it would
+  split the install across two locations.
+
+  *Why `/app` is owned by `app`, folded into the `adduser` layer rather than given a `chown` of its
+  own.* `pytest` writes its cache into the rootdir, which is `/app` itself and not the `tests/`
+  directory — so `COPY --chown` on the tests does not reach it, and a root-owned `/app` costs a
+  warning in the stream 11.3 wants clean. **Stated at its real size: a warning, not a failure.**
+  Folding `mkdir` and `chown` into the layer that already exists costs no layer at all, and the
+  ownership weakens nothing, because 3.3's src-layout means the running code is the installed
+  distribution in `site-packages` — `/app/src` is a copy nothing imports once the build is done.
+
+  *`PYTHONUNBUFFERED=1` is load-bearing, not hygiene.* Python block-buffers stdout when it is not a
+  terminal, so without it `docker compose up` shows nothing until a buffer fills — which would land
+  on 11.3's PASS/FAIL summary and on 8.6's dispatch line, the two outputs the reviewer is watching
+  for.
+
+  *The base, and the one hole left open deliberately.* `slim` is 3.7's and the 3.12 family is 2.9's;
+  **Alpine is unavailable rather than declined** — 2.5 and 2.10 both record that `psycopg[binary]`
+  ships no musl wheel, so an Alpine base breaks the approved list. The tag is **not** pinned to a
+  digest: 2.9's two generated requirements files lock everything that **runs**, and what a
+  floating tag still brings is OS security patches. A digest would trade those for a reproducibility
+  nothing here consumes, in an environment `docker compose down` destroys (A19). *This is a real gap
+  and it is chosen, not missed:* a base rebuilt months later is not byte-identical to the one this
+  was developed against.
+
+  **The build backend is the exception, and the claim above was written wider than it holds.** `uv
+  pip compile` reads `[project].dependencies` and not `[build-system].requires`, which is correct —
+  a build requirement is not a runtime one — so `setuptools>=68` appears in neither generated file.
+  `pip install --no-deps .` then resolves it from PyPI, unpinned, under build isolation, and it does
+  so again every time the layer copying `src/` is invalidated. **Nothing is changed for it:** what
+  the backend produces from a src-layout package is stable across its versions, so the exposure is
+  reproducibility of the build rather than of what ships, which is the same trade the floating tag
+  already accepts one line above. Pinning it has no clean home either — the requirements files are
+  generated and would make it a runtime dependency, and a literal version in this file is what 2.9
+  exists to prevent.
+  *Rejected — a third "builder" stage* installing into a separate prefix and copying only the result
+  into a clean final image. Its purpose is to leave a compiler toolchain behind, and **there is never
+  one to leave**: `psycopg[binary]` was chosen precisely so that nothing compiles. A third stage with
+  no output.
+
+  *`.dockerignore`, as a deny list:* `.git`, `.venv`, `__pycache__/`, `*.pyc`, `.mypy_cache/`,
+  `.ruff_cache/`, `.pytest_cache/`, `.env`, `.claude/`, `docs/`. **`.env` is the one that matters
+  beyond build speed** — 10.3 has it feed Compose interpolation and reach no container ever, and a
+  copy baked into the image would contradict that silently.
+
+  **Exec form, in both places — and the second is where the exposure actually is.** 8.8 requires the
+  image's `CMD` to be exec form. 11.1 then gave every service its own `command:`, which **overrides
+  that `CMD` entirely**, so the worker never runs the command 8.8's requirement protects. Both are
+  therefore fixed here as list form, and the requirement stands on three legs rather than one:
+  `uvicorn` needs the signal to finish in-flight HTTP requests; under shell form every service is
+  force-killed at the end of the grace period on every `down`; and 8.8's shutdown handler needs it.
+  **It survives the loss of the third** — recorded because 8.8 is under a reopen request.
+
+  | Service | `command` |
+  |---|---|
+  | `api` | `["uvicorn", "pizza.entrypoints.api.main:app", "--host", "0.0.0.0", "--port", "8000"]` |
+  | `worker` | `["python", "-m", "pizza.entrypoints.worker.main"]` |
+  | `schema` | `["python", "-m", "pizza.entrypoints.schema.main"]` |
+  | `cli` | `["python", "-m", "pizza.entrypoints.cli.main"]` |
+  | `tests` | **not written here** — 12.9 fixes it, and it arrives with the service in U11; this item binds only the form |
+
+  The literal `8000` is 10.4's, which fixed the internal port as a constant in the image's command
+  rather than a variable. The `CMD` is the API because a bare `docker run` should do something
+  coherent; all five services override it.
+
+  **No build step before `up`.** 11.1's `build:` blocks mean `docker compose up` builds what is
+  missing, so the launch R15 is graded on stays one command. The README documents
+  `docker compose up --build` for a rebuild after a source change, which is a second command for a
+  case the reviewer's first run does not contain. First-run cost is answered by the three mechanisms
+  above — the dependency layer before the source, the `.dockerignore`, and a `slim` base — and not by
+  a fourth.
+  *Source:* R14, DoD "Docker Deployment". *Constrained by:* 2.5, 2.9, 2.10, 3.3, 3.7, 8.8, 10.4,
+  11.1, 11.3, 12.9. *Extends:* 8.8's exec-form requirement to Compose's `command:`. *Leaves to
+  U11:* the `tests` command (12.9), with the service. *Realised in:* U9 for the four commands
+  above and the `Dockerfile`.
+
+- **11.10 Compose command form.** `[decided]`
+  *Decision:* **`docker compose` — the v2 plugin — with a documented prerequisite of
+  v2.24 or later, and no top-level `version:` key in the file.**
+  *Why there is no real alternative:* `docker-compose` v1 is a separate end-of-life Python tool, and
+  none of the three features this design rests on is fully available in it.
+
+  **This item exists to confirm three deferred assumptions and to set the floor 10.3 recorded as
+  missing.** 9.3 assumed v2 for `profiles`, 11.1 for `attach:`, and 11.2 for long-form `depends_on`
+  conditions; all three are confirmed.
+
+  *Where the number comes from, and why it is above the true minimum.* Of the features in use,
+  `attach:` is the newest at **v2.20** — `profiles`, long-form `depends_on` and
+  `service_completed_successfully` are all older, and 11.4's `--exit-code-from` and Compose's
+  `${VAR:-default}` interpolation older still. **v2.24 is named deliberately above that floor**, on
+  two grounds: it is the one Compose version already written in this record (10.3), so the repository
+  states one floor rather than two; and a prerequisite errs safely upward — a reviewer above it loses
+  nothing, while one below it gets a README line instead of an unexplained parse error.
+  *10.3's 2.24 does not itself raise the floor:* it belongs to `env_file: required: false`, which that
+  item **rejected**, and a declined feature sets no requirement.
+  *No top-level `version:` key.* It is a v1 artefact that v2 warns about on every run — one more line
+  in the stream 11.1's `attach: false` exists to keep clean.
+  *What the floor actually does:* it documents rather than constrains, since Docker Desktop has
+  shipped well past it for years. Its value is that an old machine produces a sentence in the README
+  instead of a YAML error that explains nothing.
+  *Source:* R14, R19. *Constrained by:* 10.3, 11.1, 11.2, 11.4, 9.3. *Confirms:* 9.3's, 11.1's and
+  11.2's version assumptions. *Realised in:* U9.
+
+- **11.11 Restart policies.** `[decided]`
+  *Decision:* **`on-failure`, uncapped, on the four services meant to stay up; nothing written on the
+  three one-shots.**
+
+  | Service | `restart` |
+  |---|---|
+  | `postgres`, `rabbitmq`, `api`, `worker` | `on-failure` |
+  | `schema`, `tests`, `cli` | the default — the key is absent |
+
+  *This is what 8.8 handed here as a requirement:* the worker's resilience **is** this policy, since
+  nothing in its code retries a broker it cannot reach.
+  *Why `on-failure` and not `always` — and the honest answer is narrower than the one first written
+  here.* This record originally argued that 8.8 gave the exit code a meaning, `0` separating "leave
+  me" from "restart me". **8.8 is under a reopen that removes the `SIGTERM` handler**, and that
+  meaning goes with it: `start_consuming()` returns only when `stop_consuming` is called, which was
+  the handler's whole work. The worker is then left with two exits — a non-zero code on a broker it
+  cannot reach, and `143` on `SIGTERM` — and exit `0` becomes unreachable, so the distinction the
+  argument honoured stops existing.
+  *What actually separates the two values, at its real size:* **in every path this system has, almost
+  nothing.** Docker applies no restart policy to a container stopped deliberately — `down`, `stop`,
+  or `Ctrl-C` on a foreground `up` — so the `143` never triggers a restart under either value. One
+  narrow difference survives, and it is real here: `always` revives a manually stopped container when
+  the Docker daemon restarts, and 13.4 documents a manual `docker compose stop` for the broker-down
+  path. Beyond that the choice is what the word states — `on-failure` names the condition that
+  warrants a restart, which is also the rule the three one-shots below are the exception to.
+  *Why uncapped:* 11.2 already prevents the startup crash-loop, since the worker does not start until
+  the broker is healthy. What remains is a broker that dies later, and a cap would abandon one that
+  comes back after the last attempt. Docker's own increasing delay between attempts is what bounds
+  the cost, and 8.8 named it.
+  *Recorded because it is the obvious worry and it does not apply:* a restart loop cannot mask a bug
+  of ours. 8.4 catches every exception inside the consumer callback and ends in a `reject`, so the
+  process does not fall over — a worker that exited means infrastructure.
+
+  *The same policy on the API and the two vendor services*, as one rule rather than three. 2.5
+  already assumed it, naming *"a database container restart (11.11)"* as one of the cases
+  `pool_pre_ping` exists for. What it buys concretely: a transient crash heals itself, and a
+  permanent one — a rejected environment variable at startup (10.2) — appears as a mounting restart
+  count in `docker compose ps` with the same error repeating in the log, which is diagnosable rather
+  than silent.
+
+  *The three one-shots carry no policy, and for `schema` that is load-bearing rather than tidy.*
+  `depends_on: condition: service_completed_successfully` waits for a successful exit, and a service
+  that restarts never reaches one — the whole stack would hang instead of failing. It is also what
+  4.6 asked for: a failed schema creation should be **one service's clear non-zero exit**, not a
+  loop. For `tests`, a restart would re-run the suite indefinitely and break 11.4's
+  `--exit-code-from tests`, which reads the exit of a service that is expected to stay exited.
+
+  *What this does not cover, stated so nothing is assumed:* a container that is alive and not working.
+  6.6 already recorded the mechanism — plain Compose does not restart an unhealthy container, and a
+  healthcheck only gates `depends_on`. No self-healing exists here for that case and none is built.
+  *Rejected:* **`always`** and **`unless-stopped`** — above; **`on-failure:N`** — above; **a policy on
+  the one-shots** — above.
+  *Source:* R14, DoD "Docker Deployment". *Constrained by:* 2.5, 4.6, 6.6, 8.4, 8.8, 11.2, 11.4.
+  *Holds:* 8.8's restart requirement. *Realised in:* U9.
 
 
 ## Topic 12 — Testing
@@ -3731,6 +4202,95 @@ and Part 4 of `03-roadmap.md`).
   *Source:* `CLAUDE.md` §5. *Constrained by:* 11.9, 12.3, 12.4, 12.5, 14.7. *Constrains:* 12.9.
   *Realised in:* U10 for the two modules, U11 for the command 14.7 gains — the directories
   themselves have been on `main` since U1.
+
+- **12.9 Where results are surfaced.** `[decided]`
+  *Decision:* **console only, no report file** — and the `command` 11.9 left blank:
+
+  ```yaml
+  tests: command: ["pytest", "tests/integration", "-v", "-ra", "--durations=0", "--tb=short"]
+  ```
+
+  Exec form is 11.9's; the path is 12.7's and nothing is added to it. The PASS/FAIL summary
+  11.3 requires is a `pytest_terminal_summary` hook in `tests/integration/conftest.py`, which
+  writes `terminalreporter.write_sep("=", "PASS")` — or `"FAIL"` — keyed on pytest's exit
+  status. `PYTHONUNBUFFERED=1` (11.9) is what puts it in the stream on time.
+
+  | Flag | Why |
+  |---|---|
+  | `-v` | one line per test, by name. 12.4 budgets ~30 s, 12 s of it in one scenario; without it the reviewer watches silence, and the four scenarios 13.1 names are not visible as they run |
+  | `--durations=0` | every scenario's real time, which turns 12.4's per-scenario budget into something measured rather than asserted |
+  | `-ra` | a recap of everything that did not pass, gathered in one place rather than scattered through the run |
+  | `--tb=short` | the failing assertion and its values, without a full traceback in a shared stream |
+
+  *Why the banner is a hook and not a shell wrapper around the command.* 11.4 rests entirely on
+  pytest's exit status reaching `--exit-code-from tests`, and every shell form that prints a
+  banner is a place to lose it — `pytest … || echo FAIL` exits **zero**, so the CI gate would be
+  green forever and nothing would say so. The hook cannot break it: it prints beside the exit
+  status instead of between it and Compose. It also reads that status directly, so a run that
+  collected no tests at all (pytest's exit 5) prints `FAIL` rather than a green banner over an
+  empty run. *The one gap:* a usage error aborts before the hook, leaving no banner — the exit
+  is still non-zero and pytest's own error is the explanation.
+
+  *Where the banner actually lands, measured on the pinned pytest rather than assumed.* The hook
+  runs before pytest's own closing sections, so the order is `FAILURES`, the banner,
+  `--durations`, `-ra`'s recap, then the counts line — **the banner is not the last thing
+  printed, and no hook placement makes it so.** `short test summary info` and the counts are
+  written once every `pytest_terminal_summary` has run, and moving the call earlier in the
+  sequence only moves the banner further up. 11.3 asks for a summary that cannot be missed rather
+  than for a last line, and a full-width separator meets that wherever it sits.
+
+  *Why no report file.* `junit-xml` is built into pytest and needs no plugin, so 2.10's list is
+  not in question; what it lacks is a reader. It would hold less than what already survives the
+  run, and 12.3 declined the `outbox` on exactly this ground — a thing nothing in the system
+  reads. **What survives, until `down` or the next `up`:** the `tests` container exits but is not
+  removed (11.1, 11.5), so `docker compose logs tests` returns the whole run — named scenarios,
+  durations, tracebacks — with the api and worker lines that interleaved it in the live stream
+  stripped away. A shell into it is not available, because `exec` needs a running container;
+  `docker compose run --rm tests <command>` starts a fresh one from the same image against the
+  live stack, which is also how a single scenario is re-run by hand.
+  *Rejected — writing the file and bind-mounting a host directory for it:* a generated artifact
+  in the reviewer's clone, needing a `.gitignore` line, and written by 11.9's non-root `app` into
+  a directory owned by someone else — a failed write aborts pytest and colours a healthy stack
+  red in the one stream 11.3 wants clean.
+  *Rejected — writing it inside the container without a mount,* retrievable by
+  `docker compose cp`. The cost is genuinely one flag, and it is still declined: it duplicates,
+  in a format nobody here parses, a subset of what `docker compose logs tests` already gives.
+  *Source:* R15, `CLAUDE.md` §5. *Constrained by:* 11.1, 11.3, 11.4, 11.5, 11.9, 12.4, 12.7.
+  *Fills:* 11.9's `tests` row. *Feeds:* 13.4 — the absence of `junit-xml` and the flag that adds
+  it, and the three commands above. *Realised in:* U11.
+
+- **12.10 Whether lint and type checks run inside the compose test run.** `[decided]`
+  *Decision:* **local-only.** 2.8's three checks stay where 14.7 put them — a per-step
+  Definition of Done run from a local virtual environment — and nothing is added to the
+  `tests` service, whose command 12.9 fixed. **Nothing is built for this item.**
+
+  *Feasibility was never the question, so this is policy and not capability:* 3.7 and 11.9
+  install the dev group into the `test` stage for `pytest`, so `ruff` and `mypy` are already in
+  `pizza-test`, with `src/` and `tests/` both under `/app`.
+
+  *Why it is not built — 1.1's ceiling test, applied literally.* Delete the gate: which named
+  DoD row fails? *Test Automation* is `pytest` and is untouched; *Docker Deployment* does not
+  read a linter. None does, so it is not built.
+  *And it could not fire in any case.* The image is built from committed source, and §8.3 with
+  14.7 make the checks a condition of every commit; 2.9 pins the dev tools in the same
+  `requirements-dev.txt` that builds the local environment, so the versions match by
+  construction. A green result would prove nothing, and a red one would mean a commit that
+  skipped its own Definition of Done — a process failure a container cannot repair.
+
+  *Rejected — an eighth one-shot `lint` service.* 11.1 closed the list at seven.
+  *Rejected — chaining the checks into the `tests` command* as `ruff … && mypy … && pytest …`.
+  A style failure then suppresses `pytest` entirely, and with it the PASS/FAIL summary 11.3
+  requires — a decided item this one may not spend. It also lets a whitespace rule colour the
+  launch red over a system that works, which 11.5 leaves running in front of the reviewer.
+
+  *The one real argument for a gate, and what answers it:* the reviewer runs only the delivered
+  environment, so a check that ran on the author's machine is a claim they cannot verify. It is
+  answered by two commands rather than a gate, since the tools are in the image anyway —
+  `docker compose run --rm tests ruff check .` and `… mypy src tests`. Verification on demand,
+  without giving a style rule the power to stop the demonstration.
+  *Source:* `CLAUDE.md` §8. *Constrained by:* 1.1, 2.8, 2.9, 3.7, 11.1, 11.3, 11.5, 11.9, 12.9,
+  14.7. *Closes 2.8's deferral;* whether the checks run in CI stays 14.3's. *Feeds:* 13.4 — the
+  two commands above. *Realised in:* nothing; the README line is U13's.
 
 
 ## Topic 13 — Documentation and deliverables
@@ -4073,8 +4633,8 @@ and Part 4 of `03-roadmap.md`).
   |---|---|
   | U1 | `ruff format --check .` · `ruff check .` · `mypy src tests` · `python -c "import pizza"` |
   | U2 | + `pytest tests/unit` |
-  | U9 | + `docker compose up` reaches 11.3's PASS summary and the test service exits zero |
-  | U11 | + the same with the full integration suite |
+  | U9 | + `docker compose up` brings every service the file defines to the state 11.2's graph requires, and the stack stays up |
+  | U11 | + the `tests` service runs the suite, prints 11.3's PASS summary, and exits zero |
 
   `python -c "import pizza"` is not filler: 3.3 chose src-layout so an import resolves only
   through the install, so its failure means the package is not installed.
@@ -4085,8 +4645,19 @@ and Part 4 of `03-roadmap.md`).
   Phase 3 document may fill a silence this file left but may not amend one of its rows.
   Each Phase 3 document states its own list, and it applies **per step commit** — so `main`
   satisfies §8.6 after a merge by construction.
+  *The U9 and U11 rows were rewritten on 2026-08-14, and the U9 row was unsatisfiable as written.*
+  It required 11.3's PASS summary, which U9 cannot produce: the `tests` service is U11's, 12.7
+  gives its `conftest.py` to U10, and the four scenarios are 12.2's — so `pytest tests/integration`
+  against the empty package exits `5`, measured rather than reasoned. The rows now name what each
+  unit can actually reach. **This is the row's own rule applied to itself:** the bar is the
+  strongest verification the system supports at that point, and at U9 that is the environment
+  coming up, not a suite that does not exist yet. The U11 row said *"the same with the full
+  integration suite"* and now states its condition outright, because "the same" pointed at a row
+  that no longer names a suite.
   *Rejected:* treating it as vacuous until U9 — §8.6 would be ceremony for eight units, and
-  nobody starts believing it later.
+  nobody starts believing it later. **Leaving the U9 row and letting U9 write the `tests` service
+  to satisfy it** — it buys a red container between two merges, requires amending 12.9 on `main`,
+  and empties U11; the reasoning is in 11.1 and in `docs/ai-log.md`.
   *Source:* `CLAUDE.md` §8. *Constrained by:* 14.4. *Constrains:* every Phase 3 document.
 
 
