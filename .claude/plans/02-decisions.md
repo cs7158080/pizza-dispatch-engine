@@ -3870,8 +3870,22 @@ and Part 4 of `03-roadmap.md`).
   *Rejected — making the gate the default launch command:* it makes the CLI deliverable
   undemonstrable straight after launch. This is the original form of the rejection and the one
   part of this item measurement left standing.
+  **That rejection is withdrawn on 2026-08-16, and it should not have survived the amendment
+  above.** Its whole reason was that the gate tore the stack down, leaving nothing to demonstrate —
+  true of `--abort-on-container-exit`, and **false of the form that replaced it**. `docker compose
+  up -d` followed by `docker compose wait tests` leaves every service running, which is 11.5's
+  requirement and is stated three lines higher as what the new form gains. A rejection whose stated
+  ground the same amendment removed is a leftover, not a decision.
+  *Consequence, and it is 13.1's to carry:* the README leads *Launch* with the two-command form,
+  because the assignment grades an environment that launches **and** executes its suite, and that
+  form is the one returning whether it did. Plain `docker compose up` follows immediately as the
+  foreground way to watch the same launch — it is not demoted to a footnote, and 11.3's PASS banner
+  in the stream is what that paragraph exists to show.
+  *Unchanged:* everything about what `up` does. This item still decides that a failing suite does
+  not tear the stack down; only which of the two commands the README prints first has moved.
   *Source:* R15, R19. *Answers:* Q8. *Amended:* 2026-08-16, on measurement rather than on a new
   argument; 11.1, 11.10, 11.11 and 12.9 carry the command's name and are amended with it.
+  *Amended again:* 2026-08-16, withdrawing a rejection the first amendment left standing.
 
 - **11.5 Behaviour after tests pass.** `[decided]`
   *Decision:* the stack **stays up**. Only the test service exits.
@@ -4790,6 +4804,33 @@ and Part 4 of `03-roadmap.md`).
   table of endpoints** — 11.8 publishes the port so that FastAPI's generated document can be
   read; a hand-written table is the same contract in a second place with nothing keeping the two
   in step.
+
+  *One section was neither kept nor deleted, and the silence had a live pointer in it.*
+  **Persistence** appears in neither the table above nor the deletion list, while 11.7 requires the
+  compose file to point at *"a README section that gives the exact lines to add if persistence is
+  wanted"* — and `docker-compose.yml` names that section by title. Deleting the heading without
+  reading 11.7 would leave a comment in a shipped file pointing at nothing. **The lines stay and the
+  heading goes:** the YAML block sits inside *Launch*, under the teardown sentence the table already
+  puts there, and the compose comment is retargeted to *Launch* in the same commit that moves it, so
+  the pointer is never dangling. 11.7 is satisfied literally — there is a README section, and it
+  gives the exact lines — and "concise" is satisfied too, since a heading is what the DoD row was
+  counting and the block is four lines of YAML under one that had to be written anyway.
+  *Rejected:* **sending the compose comment to `docs/future-work.md`** — FW13's second point wants
+  named volumes but does not carry the lines, so 11.7's requirement would go unmet by a pointer that
+  merely looks satisfied.
+
+  **Reversed on 2026-08-16, and 11.7's documentation clause is narrowed with it.** The developer
+  removed the persistence material from the README: no DoD row asks for it, the four topics
+  *Documentation* names do not include storage, and a block of YAML teaching a reader to undo a
+  decision this project made is weight in the file "concise" governs. The block goes, and the
+  paragraph above it with it. **11.7 required the compose comment to point at a README section
+  giving the exact lines; that is narrowed to the fact the requirement exists to convey** — the
+  comment now states outright that the absence is deliberate, what the launch depends on it for,
+  and what would reverse it. It needs no second file to be true. *The pointer is removed rather
+  than retargeted:* a comment naming no section cannot dangle, which is the failure the amendment
+  above was opened to prevent — reached by removal instead of by placement.
+  *What is not touched:* 11.7's decision itself, A19's disposable environment, and the teardown
+  sentence in *Launch*. Only the documentation clause moves.
 
   *Why the CLI section documents no menu:* 9.1 prints the five actions on every loop, so a
   second copy could only go stale. What a reader cannot guess is the launch command and the Git
