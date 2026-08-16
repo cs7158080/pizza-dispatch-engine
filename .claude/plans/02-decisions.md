@@ -28,10 +28,10 @@ status markers, precisely so that this table cannot be contradicted.
 | 9 — CLI | 9.1–9.6 | — |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.1–11.11 | — |
-| 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.5, 12.8 |
+| 12 — Testing | 12.1, 12.2, 12.3, 12.5, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.8 |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **104** | **7** |
+| **Total** | **105** | **6** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -111,6 +111,11 @@ and Part 4 of `03-roadmap.md`).
   driver at all. A scenario dedicated to release at `DELIVERED` would break it — and adding a
   trailing step to that scenario purely so the demo works is a test doing work for a non-test
   reason, which `CLAUDE.md` §5 forbids. If 12.1 chooses such a scenario, this item reopens.
+  **It did, and 12.5 answers the condition rather than reopening this item:** its suite-wide
+  invariant leaves the driver pool empty when the suite exits, so step 6 is unaffected and no step
+  below changes. 12.5 also narrows the sentence above — the trailing step it adds is required by
+  `CLAUDE.md` §5's order-independence, not by this path, which benefits from it without being its
+  reason.
   *What removes the silence, independently of the above:* the README states **both** outcomes of
   step 6 — if a driver is already available the assignment is immediate, and that is correct
   behaviour rather than a failure. A step that degrades legibly needs no guarantee behind it.
@@ -4375,6 +4380,61 @@ and Part 4 of `03-roadmap.md`).
   *Hands to 2.6:* one HTTP client, and nothing else; topic 12 adds nothing to 2.10's list.
   *Source:* `CLAUDE.md` §5. *Constrained by:* 6.5, 6.6, 11.6, 11.7. *Constrains:* 2.6, 12.1,
   12.2, 12.4, 12.5. *Feeds:* 13.4.
+
+- **12.5 Test data strategy and isolation.** `[decided]`
+  *Decision:* **unique data per test on a clean start, and one invariant that makes execution order
+  irrelevant — every test leaves the driver pool exactly as it found it: empty.** 11.6 chose unique
+  data over truncation; this item supplies the half it could not cover, since unique data cannot
+  scope a pool that is global by nature.
+
+  *Why this is solvable inside the suite:* 11.7 declares no volumes, so every driver that exists
+  while the suite runs was registered by the suite itself. 12.1's problem is internal to four test
+  functions, and closable by a contract between them rather than by an interface 12.3 refuses.
+
+  | Scenario | Registers | Ends with that driver | Net `AVAILABLE` |
+  |---|---|---|---|
+  | **1** Complete order lifecycle | one, first | released — `AVAILABLE` (5.6) | **+1** |
+  | **2** Recovery when a driver registers | one, mid-test | `BUSY` | 0 |
+  | **3** One driver, two orders | one | `BUSY`, on the second order | 0 |
+  | **4** API rule enforcement | none | — | 0 |
+
+  Scenario 1 is the only producer, and produces exactly one — because 12.2 makes it the only
+  scenario that asserts a release.
+
+  *The invariant, enforced in one place:* after its final assertions, scenario 1 **absorbs its own
+  driver** — one further order, advanced to `BAKING` and waited on (12.4) until `ASSIGNED`. Every
+  scenario now begins and ends at zero, so any order, any `-k` subset and any repetition of the
+  suite meet the same precondition — and the invariant is verified by reading four tests. It lives
+  in a fixture that yields, so it runs even when an assertion fails partway and the cascade is
+  contained; **the cost** is that a failure after the driver became `BUSY` leaves the absorbing
+  order unassigned and ends at 12.4's timeout — noise on an already-red run, chosen over a silent
+  absorption that would leave a driver behind with nothing to report it.
+
+  *This answers 1.2's reopen condition rather than firing it.* The pool is empty when the suite
+  exits, so the demo's step 6 is unaffected and none of its thirteen steps changes. 1.2 also
+  pre-rejected a trailing step added *"purely so the demo works"*, and that sentence is **narrowed,
+  not contradicted**: `CLAUDE.md` §5 requires order-independence, so the suite would need the
+  absorption if this project had no demo path at all. The demo is its beneficiary, not its reason.
+
+  *Identification is by the id the API returned, never by a name.* No test reads `GET /orders` or
+  searches for its own rows — 4.5 imposes no uniqueness on names, so uniqueness could not have
+  carried correctness. The unique names are for legibility: each carries its test's name and a short
+  random suffix so a reviewer can attribute every row, and the absorbing order's name says what it
+  is. **No shared data fixtures** — a driver created once and reused would reintroduce the coupling
+  this item removes.
+  *One thing this adds to 11.6:* the suite becomes re-runnable against its own residue. 11.6's
+  stated condition is untouched — a driver a reviewer registers by hand still breaks scenarios 2
+  and 3.
+
+  *Rejected:* **truncation between tests** — 12.3 admits no database client, and it would not empty
+  the wait queue scenario 2 leaves occupied; **a separate test database, vhost or stack** — 11.6
+  weighed and declined it, and the invariant costs three HTTP calls against a doubled environment;
+  **fixing the execution order** so scenario 1 runs last — the cheapest thing that would work, and
+  it contradicts §5 in as many words; **a defensive fixture before every test** absorbing whatever
+  is available — with no driver-listing endpoint (6.6) it cannot detect availability, so it would
+  pay an observation window in all four tests to solve a problem that arises in one known place.
+  *Source:* `CLAUDE.md` §5. *Constrained by:* 11.6, 11.7, 12.1, 12.2, 12.3. *Constrains:* 12.4,
+  12.8. *Answers:* 1.2's reopen condition. *Realised in:* U10.
 
 - **12.6 Scope of the unit test set.** `[decided]`
   *Decision:* **no amendment to `CLAUDE.md` §5 — the set stays inside "free", and the rule is
