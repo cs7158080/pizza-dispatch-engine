@@ -1,11 +1,10 @@
-"""The interactive client, and the process that holds it.
+"""Composition root of the interactive CLI.
 
-It composes and nothing else: the configuration is read, one connection to the API
-is opened, and the loop is handed both. Every screen, every call and every failure
-belongs to the modules beside this one.
+It reads the configuration, opens one connection to the API and hands it to the menu
+loop. Screens, calls and failure handling belong to the modules beside this one.
 
-The configuration is read first, so a missing or malformed value is one line on
-standard error rather than a traceback from somewhere further in.
+The configuration is read first, so a missing or malformed value produces one line on
+standard error rather than a traceback from further in.
 """
 
 import os
@@ -17,6 +16,7 @@ from pizza.entrypoints.cli.menu import run_menu
 
 
 def main() -> None:
+    """Run the interactive menu until the user exits."""
     try:
         settings = load_client_settings(os.environ)
     except ConfigurationError as error:

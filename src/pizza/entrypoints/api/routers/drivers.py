@@ -1,4 +1,4 @@
-"""The one driver route: registering one. There is no driver read anywhere."""
+"""Driver routes. Registration only: drivers are never read through the API."""
 
 from fastapi import APIRouter
 
@@ -12,5 +12,5 @@ router = APIRouter()
 def register_driver(
     body: RegisterDriverRequest, register: RegisterDriverDep
 ) -> Created:
-    """Register a driver, available from the start, and answer with their identifier."""
+    """Register a driver, available from the start, and return their identifier."""
     return Created(id=register(body.name))

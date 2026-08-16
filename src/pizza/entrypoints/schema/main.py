@@ -1,11 +1,7 @@
-"""The one-shot service that creates the schema, then exits.
+"""One-shot service that creates the database schema, then exits.
 
-It runs alone, before the api and the worker start, so that two processes never
-inspect the catalogue and create the same table at once. Nothing downstream starts
-unless this exits zero.
-
-It is an entry point because it composes — it builds the engine and reaches into
-infrastructure. It drives no use case.
+It runs alone, before the api and the worker start, so that no two processes create
+the same table at once. Nothing downstream starts unless this exits zero.
 """
 
 import os
@@ -18,6 +14,7 @@ from pizza.infrastructure.db.schema import create_schema
 
 
 def main() -> None:
+    """Create the schema and exit, or exit non-zero on an invalid environment."""
     try:
         settings = load_service_settings(os.environ)
     except ConfigurationError as error:

@@ -1,8 +1,7 @@
-"""The four order routes.
+"""Order routes.
 
-Each one validates, calls, and renders. No route catches a domain error and no
-route decides anything: a refused transition leaves as an exception and the
-installed handler answers it.
+Each route validates, calls a use case, and renders the result. Domain errors are
+not caught here: they propagate to the handlers installed on the application.
 """
 
 from uuid import UUID
@@ -29,7 +28,7 @@ router = APIRouter()
 
 @router.post("/orders", status_code=201)
 def place_order(body: CreateOrderRequest, place: PlaceOrderDep) -> Created:
-    """Place an order, and answer with its identifier."""
+    """Place an order and return its identifier."""
     return Created(id=place(body.customer_name, body.address, body.items))
 
 
@@ -37,7 +36,7 @@ def place_order(body: CreateOrderRequest, place: PlaceOrderDep) -> Created:
 def advance_order_status(
     order_id: UUID, body: UpdateStatusRequest, advance: AdvanceOrderStatusDep
 ) -> OrderResponse:
-    """Move an order to the requested status, and answer with the whole order."""
+    """Advance an order to the requested status and return the whole order."""
     return OrderResponse.of(advance(order_id, body.status))
 
 

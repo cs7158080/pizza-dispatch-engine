@@ -1,11 +1,11 @@
-"""Every domain error to its status code, over one body shape.
+"""Mapping of domain errors to HTTP status codes, over a single body shape.
 
-The table is the only place a domain failure meets a status number, so no route
-carries the mapping and no route repeats it. The body is always `{"detail": …}`;
-for a domain error the sentence is the error's own, so it exists once.
+The table below is the only place a domain failure meets a status code; routes do
+not repeat it. Every error body is `{"detail": ...}`, carrying the error's own
+message for a domain error.
 
-Pydantic's `422` handler is left alone: its body is a list of per-field failures,
-which is the same key carrying the shape that class of failure needs.
+Pydantic's 422 handler is left in place: its body uses the same key to carry the
+list of per-field failures.
 """
 
 from typing import Any
@@ -19,13 +19,13 @@ _STATUS: dict[type[Exception], int] = {OrderNotFound: 404, IllegalTransition: 40
 
 _Responses = dict[int | str, dict[str, Any]]
 
-# Declared per route, so the generated document names the failures it answers with.
+# Declared per route, so the generated OpenAPI document names the failures it returns.
 NOT_FOUND: _Responses = {404: {"description": "Order not found"}}
 CONFLICT: _Responses = {409: {"description": "Illegal transition"}}
 
 
 def install(app: FastAPI) -> None:
-    """Register the handlers. Called once, by the composition root."""
+    """Register the error handlers. Called once, by the composition root."""
     for error_type in _STATUS:
         app.add_exception_handler(error_type, _domain_error)
     app.add_exception_handler(Exception, _unexpected_error)
@@ -36,9 +36,9 @@ def _domain_error(request: Request, exc: Exception) -> JSONResponse:
 
 
 def _unexpected_error(request: Request, exc: Exception) -> JSONResponse:
-    """Give an unhandled exception the one key every error response carries.
+    """Answer an unhandled exception with the standard error body.
 
-    It hides nothing: Starlette re-raises after this response is sent, so the
-    server still logs the traceback.
+    Nothing is hidden: Starlette re-raises after this response is sent, so the
+    traceback is still logged.
     """
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})

@@ -1,15 +1,15 @@
-"""One message in, one dispatch attempt, one acknowledgement out.
+"""Message callback: one message in, one dispatch attempt, one acknowledgement out.
 
-Every path through the callback ends in an ack or a reject, so a message can never
-be held: the queue hands out one at a time and nothing here can keep it.
+Every path through the callback ends in an ack or a reject, so no message is ever
+held.
 
-Which of the two a message gets is the whole policy. A message is acked once its
-effect is durable or once repeating it could not help — an order that is already
-assigned, bytes that will never decode, an order that is not there. It is rejected
-when the attempt might succeed later, which sends it into the wait queue and back.
+A message is acked once its effect is durable, or once repeating it could not help:
+an order that is already assigned, bytes that will never decode, an order that does
+not exist. It is rejected when a later attempt might succeed, which sends it through
+the wait queue and back.
 
-The decoder arrives as a callable rather than an import, because this module may not
-name the one it comes from.
+The decoder is injected as a callable, since this module must not import the broker
+serialization it comes from.
 """
 
 import logging
@@ -30,11 +30,11 @@ _LOGGED_BODY_BYTES = 200
 
 
 def rejection_count(headers: Mapping[str, Any] | None, queue: str) -> int:
-    """How often the broker has dead-lettered this message from `queue` as rejected.
+    """Return how often the broker dead-lettered this message from `queue` as rejected.
 
-    Zero for a first delivery, which carries no header at all. The wait queue keeps
-    an entry of its own counting expiries, and the two advance together — reading
-    both would double the number the retry budget is measured against.
+    A first delivery carries no header at all and counts as zero. The wait queue keeps
+    a separate entry counting expiries; the two advance together, so counting both
+    would double the number the retry budget is measured against.
     """
     for entry in (headers or {}).get("x-death", []):
         if entry.get("queue") == queue and entry.get("reason") == "rejected":
@@ -43,10 +43,10 @@ def rejection_count(headers: Mapping[str, Any] | None, queue: str) -> int:
 
 
 class DispatchConsumer:
-    """The message callback, holding what a use case cannot decide.
+    """Consumes ORDER_READY messages and applies the acknowledgement policy.
 
-    `max_retries` counts rejections rather than deliveries, so the first attempt is
-    not one of them.
+    `max_retries` counts rejections rather than deliveries, so the first attempt does
+    not consume the budget.
     """
 
     def __init__(
@@ -68,11 +68,10 @@ class DispatchConsumer:
         properties: BasicProperties,
         body: bytes,
     ) -> None:
-        """Handle one delivery. The signature is the one pika calls."""
+        """Handle one delivery. The signature is the one pika requires."""
         event = self._decode(body)
         if event is None:
-            # Answered before anything else: this is the one failure with no
-            # order to name, so the body is the whole record of it.
+            # The only failure with no order to name, so the body is logged instead.
             logger.error("event=poison_message body=%r", body[:_LOGGED_BODY_BYTES])
             channel.basic_ack(method.delivery_tag)
             return
@@ -84,8 +83,8 @@ class DispatchConsumer:
             logger.error("event=order_not_found order_id=%s", event.order_id)
             acknowledge = True
         except Exception:
-            # A fault of ours or of something we depend on. Both are repaired by
-            # someone acting, after which the message passes, so it keeps circling.
+            # A fault in this service or in a dependency. Both require intervention,
+            # after which the retried message succeeds, so it keeps circling.
             logger.exception("event=dispatch_error order_id=%s", event.order_id)
             acknowledge = False
 
@@ -95,7 +94,7 @@ class DispatchConsumer:
             channel.basic_reject(method.delivery_tag, requeue=False)
 
     def _attempt(self, event: OrderReadyEvent, rejections: int) -> bool:
-        """Dispatch once, and report whether the message is finished with.
+        """Dispatch once and return whether the message can be acknowledged.
 
         False sends it back for another attempt after the wait.
         """
