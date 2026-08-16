@@ -99,8 +99,8 @@ services:
         condition: service_healthy
 
   # Runs once at launch and exits, leaving the rest of the stack up. No restart key:
-  # a restart would re-run the suite indefinitely, and `docker compose wait tests`
-  # reads the exit of a service that is expected to stay exited.
+  # a restart would re-run the suite indefinitely, and the CI gate in README.md
+  # reads the exit of a container that is expected to stay exited.
   tests:
     build:
       context: .

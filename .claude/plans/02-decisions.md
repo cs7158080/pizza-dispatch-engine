@@ -3571,7 +3571,7 @@ and Part 4 of `03-roadmap.md`).
   | `schema` | `pizza-runtime`, one-shot | 4.6, which writes both the service and its name |
   | `api` | `pizza-runtime` | 3.7; the name by 10.1's `http://api:8000` |
   | `worker` | `pizza-runtime` | 3.7; the name by 4.6's diagram |
-  | `tests` | `pizza-test` (`target: test`) | 3.7, 11.3; the name by 11.4's `docker compose wait tests` |
+  | `tests` | `pizza-test` (`target: test`) | 3.7, 11.3; the name by 11.4's `docker compose ps -aq tests` |
   | `cli` | `pizza-runtime`, `profiles: ["cli"]` | 9.3, which writes `docker compose run --rm cli` |
 
   *Every name in the third column is already load-bearing somewhere else* — inside a URL our code
@@ -3832,14 +3832,15 @@ and Part 4 of `03-roadmap.md`).
 
   ```
   docker compose up -d
-  docker compose wait tests
+  docker wait $(docker compose ps -aq tests)
   ```
 
-  *Why two.* `docker compose wait` blocks until the named service's container stops and returns
-  that container's exit code — which is the whole of what a gate needs, and it names the service
-  it reads. Separating the launch from the wait is what makes the code reachable at all: every
-  single-command form Compose offers reads the **first** container to exit, and that is not this
-  one.
+  *Why two.* `docker wait` blocks until the named container stops and returns its exit code — which
+  is the whole of what a gate needs. Separating the launch from the wait is what makes the code
+  reachable at all: every single-command form Compose offers reads the **first** container to exit,
+  and that is not this one. *Why `docker wait` and not the compose plugin's own:* the plugin blocks
+  on running containers only and errors once the suite has finished, which the amendment below
+  measures.
   *What it costs:* the stack is left running, so a gate that wants it gone ends with
   `docker compose down`. Against the form this replaces that is a gain rather than a cost —
   11.5 requires the stack to stay up, and the old command tore it down.
@@ -3876,16 +3877,46 @@ and Part 4 of `03-roadmap.md`).
   up -d` followed by `docker compose wait tests` leaves every service running, which is 11.5's
   requirement and is stated three lines higher as what the new form gains. A rejection whose stated
   ground the same amendment removed is a leftover, not a decision.
-  *Consequence, and it is 13.1's to carry:* the README leads *Launch* with the two-command form,
-  because the assignment grades an environment that launches **and** executes its suite, and that
-  form is the one returning whether it did. Plain `docker compose up` follows immediately as the
-  foreground way to watch the same launch — it is not demoted to a footnote, and 11.3's PASS banner
-  in the stream is what that paragraph exists to show.
   *Unchanged:* everything about what `up` does. This item still decides that a failing suite does
-  not tear the stack down; only which of the two commands the README prints first has moved.
+  not tear the stack down.
+
+  **`docker compose wait` is withdrawn too, on 2026-08-16, and the reason is that it answers wrongly
+  once the suite has finished.** It blocks only on a **running** container. The moment `tests` exits
+  — about twenty seconds into a launch — it stops finding one and prints `no containers for project`
+  with **exit 1**. Measured on Compose v2.31.0 against a suite that had just passed with `tests`
+  exited `0`:
+
+  | Command, run after `tests` exited `0` | Output | Exit |
+  |---|---|---|
+  | `docker compose wait tests` | `no containers for project "project"` | **`1` — failure over a suite that passed** |
+  | `docker wait $(docker compose ps -aq tests)` | `0` | `0` |
+
+  **This is the mirror of the failure the first amendment was opened to fix,** and it went unseen
+  because #28 measured only the immediate case: chained on one line, `wait` catches the container
+  still running and answers correctly. A person typing two commands loses that race every time, and
+  the developer hit it on the first real launch. A gate that reports red on a green system is as
+  disqualifying as one that reports green on a suite that never ran.
+  *The replacement is `docker wait` on the container id,* which blocks while the container runs
+  **and** returns the recorded status once it has stopped — measured at 22 s blocking on a live run,
+  then the same `0` when re-queried after exit. The compose plugin has no equivalent.
+
+  **The consequence is larger than a substitution, and it is 13.1's to carry: the README documents
+  no gate at all.** *Launch* is plain `docker compose up` — the form that runs the suite and prints
+  11.3's banner into the stream, which is still the launch-that-executes-its-tests the assignment
+  grades, and which has no exit-code trap in it. The `docker wait` form is **not** written there.
+  *Why removed rather than demoted:* 14.3 runs no CI, so nothing in this delivery reads that exit
+  code — the paragraph described a consumer that does not exist. The developer's rule for the file
+  is the general form of it: **the README states what the system is, not what a reader could
+  additionally do with it.** A command with no caller is the second kind.
+  *What this costs, stated rather than glossed:* R19's "exit code" reading, if a grader holds one,
+  is answered by this record rather than by the README. The measurement above stands and the command
+  is written here, so the capability is documented — in the file that documents decisions.
+  *What it does not cost:* anything of R15. The suite still runs at every launch, and its verdict is
+  still unmissable in the stream a reviewer is already watching.
   *Source:* R15, R19. *Answers:* Q8. *Amended:* 2026-08-16, on measurement rather than on a new
   argument; 11.1, 11.10, 11.11 and 12.9 carry the command's name and are amended with it.
-  *Amended again:* 2026-08-16, withdrawing a rejection the first amendment left standing.
+  *Amended again:* 2026-08-16, withdrawing a rejection the first amendment left standing, and
+  replacing `docker compose wait` after it was measured returning `1` over a passing suite.
 
 - **11.5 Behaviour after tests pass.** `[decided]`
   *Decision:* the stack **stays up**. Only the test service exits.
@@ -4134,7 +4165,7 @@ and Part 4 of `03-roadmap.md`).
   conditions; all three are confirmed.
 
   *Where the number comes from, and why it is above the true minimum.* Of the features in use,
-  `attach:` and 11.4's `docker compose wait` are the newest, both at **v2.20** — `profiles`,
+  `attach:` is the newest at **v2.20** — `profiles`,
   long-form `depends_on` and `service_completed_successfully` are all older, and Compose's
   `${VAR:-default}` interpolation older still. **v2.24 is named deliberately above that floor**, on
   two grounds: it is the one Compose version already written in this record (10.3), so the repository
@@ -4195,7 +4226,7 @@ and Part 4 of `03-roadmap.md`).
   that restarts never reaches one — the whole stack would hang instead of failing. It is also what
   4.6 asked for: a failed schema creation should be **one service's clear non-zero exit**, not a
   loop. For `tests`, a restart would re-run the suite indefinitely and break 11.4's
-  `docker compose wait tests`, which reads the exit of a service that is expected to stay exited.
+  11.4's gate, which reads the exit of a container expected to stay exited.
 
   *What this does not cover, stated so nothing is assumed:* a container that is alive and not working.
   6.6 already recorded the mechanism — plain Compose does not restart an unhealthy container, and a
@@ -4702,7 +4733,7 @@ and Part 4 of `03-roadmap.md`).
   | `--tb=short` | the failing assertion and its values, without a full traceback in a shared stream |
 
   *Why the banner is a hook and not a shell wrapper around the command.* 11.4 rests entirely on
-  pytest's exit status reaching `docker compose wait tests`, and every shell form that prints a
+  pytest's exit status reaching 11.4's gate, and every shell form that prints a
   banner is a place to lose it — `pytest … || echo FAIL` exits **zero**, so the CI gate would be
   green forever and nothing would say so. The hook cannot break it: it prints beside the exit
   status instead of between it and Compose. It also reads that status directly, so a run that
@@ -4782,7 +4813,7 @@ and Part 4 of `03-roadmap.md`).
   | Section | Contents | Required by |
   |---|---|---|
   | *(head)* | three lines — what the system is, and the stack | §7 — "written for someone who has never seen the project" |
-  | **Launch** | Compose v2.24 (11.10), `docker compose up` and what it prints (11.3), the API URL and `/docs` (11.8), `--build` (11.9), the CI-style gate (11.4), teardown with `docker compose down` (11.7), two lines on `.env.example` (10.3) | DoD *Docker Deployment*; *Documentation* — "launch execution" |
+  | **Launch** | Compose v2.24 (11.10), `docker compose up` and what it prints (11.3), the API URL and `/docs` (11.8), `--build` (11.9), teardown with `docker compose down` (11.7), two lines on `.env.example` (10.3) | DoD *Docker Deployment*; *Documentation* — "launch execution" |
   | **Using the CLI** | `docker compose run --rm cli` (9.3), the Git Bash / `winpty` note (9.6), then 1.2's thirteen steps as the run that shows the system — **including both outcomes of step 6** | DoD *Interactive CLI*; *Documentation* — "CLI client usage" |
   | **How it works** | the sequence diagram. **Its format and placement are 13.2's, its count 13.3's** | DoD *System Design*; R17 |
   | **Tests** | what runs at launch, the four scenario names one line each (12.2), re-running (12.9), the lint and type commands (12.10), and 11.6's determinism boundary — written with `down`, not `down -v` | DoD *Test Automation*; *Documentation* — "test instructions"; §5 |

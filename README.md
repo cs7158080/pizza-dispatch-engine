@@ -13,28 +13,18 @@ Requires Docker with the Compose v2 plugin, version 2.24 or later — check with
 `docker compose version`.
 
 ```
-docker compose up -d
-docker compose wait tests
+docker compose up
 ```
 
 That builds the image on the first run, starts PostgreSQL, RabbitMQ, a one-shot service that
 creates the database schema, the API and the dispatch worker, and then — once the broker and the
-API are healthy — runs the integration suite against the system it has just started. It needs no
-setup and no `.env` file: every value has a working default.
-
-`docker compose wait` blocks until the suite finishes and **returns its exit code**, so this form
-is also the CI gate: `0` means the system came up and proved itself. The stack is left running
-either way, so a failing suite leaves you a system to look at rather than a torn-down one.
+API are healthy — runs the integration suite against the system it has just started, printing an
+unmissable `PASS` or `FAIL` separator into the stream as it goes. It needs no setup and no `.env`
+file: every value has a working default.
 
 **The first launch takes about four minutes**, nearly all of it building the image. Every launch
-after that reaches the verdict in under a minute.
-
-To watch it happen instead, run it in the foreground — the same launch, with the services' logs and
-an unmissable `PASS` or `FAIL` separator printed into the stream as it goes:
-
-```
-docker compose up
-```
+after that reaches the verdict in under a minute. The suite runs once and exits; everything else
+stays up either way, so a failing suite leaves you a system to look at rather than a torn-down one.
 
 The database and the broker are deliberately kept out of this stream, so what you see is the API,
 the worker and the test run. Their logs are still collected — `docker compose logs postgres`.
