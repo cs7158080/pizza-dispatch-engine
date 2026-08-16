@@ -14,6 +14,8 @@ import pytest
 
 from pizza.config import load_client_settings
 
+from .waiting import wait_until
+
 
 @pytest.fixture(scope="session")
 def client() -> Iterator[httpx.Client]:
@@ -36,3 +38,38 @@ def unique_name(request: pytest.FixtureRequest) -> Callable[[str], str]:
         return f"{request.node.name}-{label}-{uuid4().hex[:8]}"
 
     return make
+
+
+@pytest.fixture
+def absorbs_its_driver(
+    client: httpx.Client, unique_name: Callable[[str], str]
+) -> Iterator[None]:
+    """Leaves the driver pool exactly as the test found it: empty.
+
+    Only one scenario ends with a driver back in the pool, so only one has to take
+    it out again. With this in place every test begins and ends at zero available
+    drivers, which is what lets them run in any order, as any subset, and twice.
+
+    It yields, so the absorption also happens when the test fails partway. A
+    failure after the driver became busy leaves this order unassigned and ends at
+    the waiting timeout — noise on a run that is already red, which is the price of
+    never silently leaving a driver behind.
+    """
+    yield
+
+    placed = client.post(
+        "/orders",
+        json={
+            "customer_name": unique_name("absorb"),
+            "address": "1 Test Street, Testville",
+            "items": ["Margherita"],
+        },
+    )
+    assert placed.status_code == 201, placed.text
+    order_id = placed.json()["id"]
+
+    for status in ("PREPARING", "BAKING"):
+        moved = client.patch(f"/orders/{order_id}/status", json={"status": status})
+        assert moved.status_code == 200, moved.text
+
+    wait_until(client, order_id, lambda order: order["driver"] is not None)
