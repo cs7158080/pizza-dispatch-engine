@@ -307,3 +307,21 @@ recorded.
   *What would trigger it:* taking FW12, which closes it as a side effect; or a broker that stops
   being a container on the same Compose host, at which point a connection that establishes and then
   stops answering is no longer exotic.
+
+- **FW18 — Continuous integration.** Nothing runs automatically when a commit lands. The checks
+  are all decided and all exist — the linter, the type checker and the unit tests before every
+  commit (14.7), the integration suite inside `docker compose up` (R15, 11.3), and that same suite
+  as a gate propagating its exit code (11.4) — and every one of them waits for a person to type
+  it. A server would add the trigger and nothing else, **which is why no pipeline definition is
+  written here either:** the commands are decided already, and what is missing is a machine.
+  *What taking it costs, measured rather than guessed:* a Jenkins image carrying a plugin set
+  sufficient to run those commands builds in **9m01s** from a clean cache and adds 74 MB to
+  `jenkins/jenkins:lts`'s 483 MB, resolving plugins from an update centre inside the build.
+  `jenkinsfile-runner`, the route that needs no server, has had no release since a 2023 beta.
+  *Where it would live, and it is not this repository.* A CI server is infrastructure shared
+  across projects, not a service in the file R14 defines — 11.1 closed that list at seven, and
+  12.10 rejected an eighth one-shot on the same ground. The shape is a server that already exists,
+  pointed at 14.1's public repository, with the pipeline definition committed beside the code so
+  that the process is versioned with what it builds.
+  *What would trigger it:* a second person merging. 14.3's accepted cost — a locally skipped check
+  with nothing to catch it — is one an author carries by discipline and a team cannot.

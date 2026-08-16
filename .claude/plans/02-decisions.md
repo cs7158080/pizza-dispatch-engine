@@ -4401,7 +4401,7 @@ and Part 4 of `03-roadmap.md`).
   *Source:* R17, DoD *System Design*. *Constrained by:* 1.2, 11.1, 13.2. *Realised in:* U13.
 
 - **13.4 Trade-off log content.** `[decided]`
-  *Decision:* **eight entries and one selection rule**, in the README's *Trade-offs* section
+  *Decision:* **nine entries and one selection rule**, in the README's *Trade-offs* section
   (13.1). Each is three to six lines: what was chosen, what was rejected, what it costs.
 
   *The rule:* **an entry is written when a reviewer would otherwise read the delivered system as a
@@ -4409,7 +4409,7 @@ and Part 4 of `03-roadmap.md`).
   departs from the orthodox arrangement (publishing after the commit, tests that touch no
   database), and what carries a visible cost (`200` on a status update whose event was lost). It
   excludes choices with no genuine alternative — 1.3 filtered those once already, and a section
-  that defends `ruff` buries the eight that matter.
+  that defends `ruff` buries the nine that matter.
 
   | # | Entry | Assembled from |
   |---|---|---|
@@ -4421,6 +4421,7 @@ and Part 4 of `03-roadmap.md`).
   | 6 | Every launch starts from empty, and there is no second test stack | 11.6, 11.7, FW13 |
   | 7 | No schema migrations, and the condition that reverses it | 4.6, FW16 |
   | 8 | The tests assert through the contract, never through the schema | 12.3 |
+  | 9 | **No CI server, and what stands in for one** | 14.3, FW18 |
 
   *Entry 2 is the only one carrying a command, and that is deliberate:* `docker compose stop
   rabbitmq`, then a status update — `200`, and the order stays `PENDING`. 11.11 named the command,
@@ -4434,6 +4435,15 @@ and Part 4 of `03-roadmap.md`).
   objection before the answer; and the entry names FW13 as this project's own future work, which
   is what shows the norm was known rather than overlooked.
 
+  **No CI server, and what stands in for one.** Nothing runs by itself when a commit lands: the
+  linter, the type checker and the unit tests run locally before each one, and `docker compose up`
+  runs the integration suite in front of whoever launched it. Running a Jenkins alongside the stack
+  was weighed and priced — a plugin set able to drive those commands builds in about nine minutes on
+  a clean cache, paid by whoever launches this first — and the server-free tool that would have
+  validated a pipeline without one has had no release since 2023. What the gap costs is a check
+  skipped locally with nothing to catch it, which one author carries by discipline and a team cannot;
+  a CI server is in the future-work register.
+
   *Form, and it is 1.4's rule made concrete.* No entry carries an item number: "see 7.5" is noise
   to a reader who has not opened the planning record, and 14.5 requires the README to stand alone.
   The section ends with **one** pointer to `.claude/plans/02-decisions.md`, which is the "linked
@@ -4446,9 +4456,11 @@ and Part 4 of `03-roadmap.md`).
   of `03-roadmap.md` for the full register. **No `FW` code appears in the README**; the codes are
   internal and carry no meaning to a reader.
 
-  *A ninth entry was rejected in review, and its content placed rather than dropped.* What the
-  launch does not gate — no report file (12.9), no lint or type gate (12.10) — has no heavy
-  alternative under the rule above; it is a note, not a trade-off. Both records read *Feeds:
+  *A different candidate for this slot was rejected in review, and its content placed rather than
+  dropped.* What the launch does not gate — no report file (12.9), no lint or type gate (12.10) —
+  has no heavy alternative under the rule above; it is a note, not a trade-off. **That is what
+  separates it from entry 9,** which names the same missing automatic gate and does have one: a
+  Jenkins service was priced before it was declined. Both records read *Feeds:
   13.4*, so: `--junit-xml=` becomes one sentence in *Tests*, beside the decision it reverses, and
   12.10's two `docker compose run --rm tests` commands go to `docs/how-this-was-built.md` beside
   the pre-commit checks — which is where 12.10's own argument lands, since that file is what claims
@@ -4456,11 +4468,11 @@ and Part 4 of `03-roadmap.md`).
   the log and single-scenario commands stay.
 
   *Rejected:* **an entry per decision that has a genuine alternative** — 1.3's filter admits far
-  more than eight, and the section would restate the record instead of summarising it, which is
+  more than nine, and the section would restate the record instead of summarising it, which is
   what 1.4 forbids. **The squash-merge and branch workflow** — process rather than design, and
   14.5's file already holds it.
   *Source:* R19, DoD *Documentation*, `CLAUDE.md` §7. *Constrained by:* 1.2, 1.4, 2.1, 2.2, 2.4,
-  4.6, 7.5, 7.6, 8.2, 8.3, 8.5, 8.9, 9.4, 11.6–11.8, 11.11, 12.3, 12.9, 12.10, 13.1, 14.5.
+  4.6, 7.5, 7.6, 8.2, 8.3, 8.5, 8.9, 9.4, 11.6–11.8, 11.11, 12.3, 12.9, 12.10, 13.1, 14.3, 14.5.
   *Narrows:* 13.1's Tests row, and 12.9's and 12.10's *Feeds* lines. *Realised in:* U13.
 
 - **13.5 `docs/ai-log.md`.** `[decided]`
@@ -4535,9 +4547,29 @@ and Part 4 of `03-roadmap.md`).
   item's objection — and that agreement ships (14.5), so departing from it is visible.
   *No self-review, stated rather than dressed up:* the value is the record, not a review pause a
   person performs against themselves.
-  *No CI:* R15 already has `docker compose up` run the suite and 11.3 print PASS/FAIL, which
-  outweighs a lint badge; 12.10 may put `ruff` and `mypy` in the same run. **Accepted cost:** a
-  locally skipped check has nothing to catch it.
+  *No CI, re-examined on 2026-08-16 and unchanged — the alternatives were priced this time
+  rather than waved off.* R15 already has `docker compose up` run the suite with 11.3 printing
+  PASS/FAIL, and 12.10 closed the lint and type checks as local-only, so what a CI server adds is
+  not a command but a **trigger**: the same checks, run without being asked. Three routes to one
+  were weighed. **Jenkins as a compose service** — a plugin set sufficient to run those commands
+  builds in **9m01s** from a clean cache and adds 74 MB to a 483 MB base image, paid by the
+  reviewer on a first launch, for a service R14 does not name and 11.1 closed its list against.
+  **`jenkinsfile-runner`**, which would have validated a pipeline with no server at all — its
+  published image is dated 2022-07-29 and its last release, 1.0-beta-32 (2023-11-12), is still a
+  beta, so 2.10's bar is not met. **A committed `Jenkinsfile` with nothing in the delivery to run
+  it** — genuinely cheap, and it fails 1.1's ceiling test with no DoD row behind it. Nothing is
+  built, and no exception to 1.1 is needed.
+
+  *One of this item's own arguments is withdrawn.* It counted a CI server's network dependency
+  against it. The delivery already pulls `python:3.12-slim`, `postgres:16`, `rabbitmq:3.13` and
+  every pinned wheel over the network, so a network dependency does not separate the two — what
+  separates them is that those are required and a CI server is not, so the same failure surface
+  buys nothing a DoD row names. **The pinning half survives at reduced size:** the images are
+  pinned by 11.1 and the wheels by 2.9, while plugins resolve to the latest compatible version
+  unless all 58 in the transitive set are pinned by hand.
+  **Accepted cost, unchanged:** a locally skipped check has nothing to catch it — which one author
+  carries by discipline and a team cannot, and that is the condition FW18 records as reversing it.
+
   *Planning commits.* Phase 1 and the decisions taken before the split landed through one pull
   request from `plan/project-planning`. **Phase 2 and Phase 3 then part company, because they run
   on different clocks.** A unit's remaining Phase 2 items are settled on a short `plan/u<N>-gate`
@@ -4572,9 +4604,10 @@ and Part 4 of `03-roadmap.md`).
   planning, before its implementation** — the closest reading of §2 Phase 4, and it buys no real
   evidence: with no self-review stage a merged pull request records that merge was pressed, not
   that a review happened. The ordering stays visible anyway, since the planning commit precedes
-  the step commits on the branch. **CI as a required gate** — an external dependency for checks
-  that already run before every commit.
+  the step commits on the branch. **CI as a required gate** — what a gate adds is a trigger rather
+  than a check, and the routes to one are priced above.
   *Source:* `CLAUDE.md` §4. *Constrained by:* 14.2, 14.4. *Answers:* 2.8's CI deferral.
+  *Feeds:* 13.4. *Deferred to:* FW18.
 
 - **14.4 Unit-to-commit map.** `[decided]`
   *Decision:* **one commit per Phase 3 step; one branch and one pull request per unit.** The map
