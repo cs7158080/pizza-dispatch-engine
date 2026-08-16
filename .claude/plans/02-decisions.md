@@ -28,10 +28,10 @@ status markers, precisely so that this table cannot be contradicted.
 | 9 — CLI | 9.1–9.6 | — |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.1–11.11 | — |
-| 12 — Testing | 12.1–12.7, 12.9, 12.10 | 12.8 |
+| 12 — Testing | 12.1–12.10 | — |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **106** | **5** |
+| **Total** | **107** | **4** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -4585,6 +4585,38 @@ and Part 4 of `03-roadmap.md`).
   *Source:* `CLAUDE.md` §5. *Constrained by:* 11.9, 12.3, 12.4, 12.5, 14.7. *Constrains:* 12.9.
   *Realised in:* U10 for the two modules, U11 for the command 14.7 gains — the directories
   themselves have been on `main` since U1.
+
+- **12.8 Deterministic testing of the retry path.** `[decided]`
+  *Decision:* **the test controls the event that removes the scarcity, and nothing else.** It
+  withholds a driver, advances the order to `BAKING`, observes `PENDING` over 12.4's window, and
+  then supplies one — by registering a driver in scenario 2, by releasing one at `DELIVERED` in
+  scenario 3. No configuration is tuned, no clock is moved, and no broker interface is opened.
+
+  *What makes the retry observable at all over HTTP:* the transition from `PENDING` with
+  `driver: null` to `ASSIGNED`, **with no further `PATCH` sent** (12.2). Nothing but a redelivery of
+  the original message could have produced it, so the outcome is the evidence that the message
+  survived. 8.6 rules out the dispatch log line and 12.3 admits no broker client; neither is needed.
+
+  *Why this is deterministic rather than lucky — three properties, none of them timing:*
+
+  | What could otherwise flake | What removes it |
+  |---|---|
+  | The message is lost, so the assignment never comes | 8.2 — the wait queue has no consumer and a TTL; the message must return |
+  | A driver from elsewhere claims the order | 12.5's invariant — the pool is empty, so the driver the test registered is the only candidate |
+  | The registration misses the next delivery's window | There is no window to miss: any delivery after the registration finds the driver, and 12.4's timeout exceeds a full cycle, so it is always caught |
+
+  *The cadence is never asserted, only the outcome.* Asserting that the assignment took 8 s would
+  test 10.4's value instead of R9's behaviour, and would fail on a loaded machine. 12.4's timeout is
+  an upper bound, not an assertion.
+  *The waiting order cannot exhaust its budget first:* 8.3 allows 64 s (10.4), and both tests remove
+  the scarcity within seconds of creating it. This is the floor 1.2 set and 12.1 paid for.
+  *Both scenarios are one item* because the mechanism is identical; they differ only in what ends
+  the scarcity, which is why 12.2 keeps them apart as tests.
+  *Not covered, and stated:* budget exhaustion to `FAILED` — 12.1 ranked and dropped it, FW13 is its
+  home; and 7.4's `x-death` count, which no test observes. The suite sees that the message came
+  back, never how many times.
+  *Source:* R9, `CLAUDE.md` §5. *Constrained by:* 1.2, 8.2, 8.3, 10.4, 12.1, 12.2, 12.3.
+  *Consumes:* 12.4, 12.5. *Realised in:* U10.
 
 - **12.9 Where results are surfaced.** `[decided]`
   *Decision:* **console only, no report file** — and the `command` 11.9 left blank:
