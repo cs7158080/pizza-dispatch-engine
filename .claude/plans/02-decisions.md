@@ -4805,6 +4805,19 @@ and Part 4 of `03-roadmap.md`).
   named volumes but does not carry the lines, so 11.7's requirement would go unmet by a pointer that
   merely looks satisfied.
 
+  **Reversed on 2026-08-16, and 11.7's documentation clause is narrowed with it.** The developer
+  removed the persistence material from the README: no DoD row asks for it, the four topics
+  *Documentation* names do not include storage, and a block of YAML teaching a reader to undo a
+  decision this project made is weight in the file "concise" governs. The block goes, and the
+  paragraph above it with it. **11.7 required the compose comment to point at a README section
+  giving the exact lines; that is narrowed to the fact the requirement exists to convey** — the
+  comment now states outright that the absence is deliberate, what the launch depends on it for,
+  and what would reverse it. It needs no second file to be true. *The pointer is removed rather
+  than retargeted:* a comment naming no section cannot dangle, which is the failure the amendment
+  above was opened to prevent — reached by removal instead of by placement.
+  *What is not touched:* 11.7's decision itself, A19's disposable environment, and the teardown
+  sentence in *Launch*. Only the documentation clause moves.
+
   *Why the CLI section documents no menu:* 9.1 prints the five actions on every loop, so a
   second copy could only go stale. What a reader cannot guess is the launch command and the Git
   Bash failure, and that is exactly what is written.

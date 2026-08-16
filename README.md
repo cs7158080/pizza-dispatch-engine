@@ -28,6 +28,17 @@ just started and prints an unmissable `PASS` or `FAIL` separator into the same s
 and exits, and **everything else stays up either way** — a failing suite leaves you a system to
 look at rather than a torn-down one.
 
+**As a CI-style gate**, where what matters is an exit code rather than a demonstration, launch
+detached and then wait on the test service:
+
+```
+docker compose up -d
+docker compose wait tests
+```
+
+`docker compose wait` blocks until that service's container stops and returns its exit code. The
+stack is left running, so a gate that wants it gone ends with `docker compose down`.
+
 The database and the broker are deliberately kept out of this stream, so what you see is the API,
 the worker and the test run. Their logs are still collected — `docker compose logs postgres`.
 
@@ -42,45 +53,14 @@ else. Nothing inside the environment changes; only the host side moves.
 After changing anything under `src/` or `tests/`, rebuild with `docker compose up --build`: the
 images carry their own copy of the code, so a launch without it runs what was there before.
 
-**As a CI-style gate**, where what matters is an exit code rather than a demonstration, launch
-detached and then wait on the test service:
-
-```
-docker compose up -d
-docker compose wait tests
-```
-
-`docker compose wait` blocks until that service's container stops and returns its exit code. The
-stack is left running, so a gate that wants it gone ends with `docker compose down`.
-
 `.env.example` lists every value the services read, each already supplied with a working default by
 `docker-compose.yml` — copy it to `.env` to override any of them; `.env` is never committed, and the
 credentials in it are local defaults for a disposable environment rather than secrets.
 
-To stop and reset, `docker compose down`. There are no named volumes: PostgreSQL and RabbitMQ write
-to their own container filesystems, so `down` deletes the data along with the containers and the
-next `up` starts from empty. Stopping with `Ctrl-C` keeps everything — the containers still exist,
-and only `down` removes them.
-
-That is deliberate. Every launch starts from a known state, no orders and no drivers, which is what
-makes a run reproducible. To keep the data instead, add to `docker-compose.yml`:
-
-```yaml
-services:
-  postgres:
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-  rabbitmq:
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-
-volumes:
-  postgres-data:
-  rabbitmq-data:
-```
-
-The reset then becomes `docker compose down -v`, because data in a named volume outlives the
-containers.
+To stop and reset, `docker compose down`. There are no named volumes, so that deletes the data along
+with the containers and the next `up` starts from empty. Stopping with `Ctrl-C` keeps everything —
+the containers still exist, and only `down` removes them. That is deliberate: every launch starts
+from a known state, no orders and no drivers, which is what makes a run reproducible.
 
 ## Using the CLI
 
