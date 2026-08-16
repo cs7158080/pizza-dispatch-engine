@@ -2895,6 +2895,7 @@ and Part 4 of `03-roadmap.md`).
   |---|---|---|
   | `event=worker_ready` | `INFO` | 8.8 |
   | `event=dispatch_notification order_id driver_id driver_name at` | `INFO` | 8.6 |
+  | `event=nothing_to_do order_id` | `INFO` | 5.5's idempotence |
   | `event=no_driver_available order_id attempt` | `WARNING` | 8.2's cycle |
   | `event=dispatch_failed order_id` | `ERROR` | 8.3 |
   | `event=poison_message body` | `ERROR` | 8.4 |
@@ -2902,11 +2903,40 @@ and Part 4 of `03-roadmap.md`).
   | `event=dispatch_error order_id`, with the traceback | `ERROR` | 8.4 |
   | `event=broker_unreachable` · `event=broker_connection_lost` | `ERROR` | 8.8 |
 
+  **`event=nothing_to_do` was added at U9, after driving the environment by hand.** This table
+  originally left the idempotent path silent, and 1.2's step 10 promises the opposite — it carries
+  the `T1:` prefix that sends a reviewer to watch terminal 1, exactly as steps 6 and 8 do, for the
+  second publish that *"worker acks, changes nothing"*. With no line there is nothing to watch, and
+  a reviewer following the demo path cannot tell a correctly ignored event from a lost one. The two
+  records had disagreed since the table closed. `INFO` rather than `WARNING`, because unlike the
+  no-driver cycle this is a correct and final outcome, which is 8.6's level.
+  *Named `nothing_to_do` and not `already_assigned`:* the outcome comes from
+  `not order.can_be_assigned()`, which covers an order already delivered as well as one already
+  assigned, so the narrower name would be false on the terminal path. Mapping the line 1:1 onto
+  `DispatchOutcome` is also what keeps the two from drifting.
+
   `WARNING` rather than `INFO` for the no-driver rejection, because those are the lines a reviewer
   is meant to watch: 1.2's steps 7 and 8 are 64 seconds of that cycle, and they should not read as
-  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output,
-  and no per-library level is curated, since a filtered module list is configuration with no
-  reader.
+  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output.
+
+  **One per-library level is curated, and this record originally refused to curate any.** The ground
+  was that a filtered module list is *"configuration with no reader"*. That claim did not survive
+  the environment being driven by hand at U9. `pika` narrates at `INFO`, and the api holds a
+  long-lived publisher connection whose heartbeats nothing services between requests (7.7's stated
+  asymmetry with the worker) — so RabbitMQ closes it after 60 s of idle, and the next `PATCH` finds
+  a reset socket. 7.5's single reconnect then does its job in about 40 ms and loses nothing, but it
+  prints roughly twenty-five lines and two tracebacks on the way. 1.2's demo path is thirteen steps
+  a person types, so an idle minute is certain and a reviewer meets that wall in the stream steps 6,
+  8 and 10 send them to watch. **The reader the original argument said did not exist is the reviewer
+  1.2 is built around.**
+  `logging.getLogger("pika").setLevel(logging.WARNING)`, in `configure_logging` beside the format —
+  one line, and the list stays at one entry. **`WARNING` and not `CRITICAL`:** `pika`'s own `ERROR`
+  records survive, so a broker that is genuinely unreachable still prints before 8.8's exit.
+  *Rejected — `heartbeat=0` on the publisher's `URLParameters`,* which would stop the disconnect
+  rather than the narration of it: it reopens 7.7 and leaves a genuinely dead connection undetected
+  until the next publish. *Rejected — leaving it and describing the wall in the README:* it explains
+  a red block instead of removing one, in the one stream 11.1's `attach: false` exists to keep
+  clean.
   *`at=` is not a duplicate of `asctime`:* it is when the assignment happened, taken from the
   `Clock` and written to the database, against when the line was emitted.
 
@@ -2930,8 +2960,9 @@ and Part 4 of `03-roadmap.md`).
 
   *Roadmap consequence, recorded rather than assumed:* U7 builds `pizza/log.py` because it is the
   first entrypoint, so `8.7` joins U7's *Decided by* cell in Part 4.
-  *Source:* R8, R9, DoD. *Constrained by:* 2.6, 7.2, 8.4, 8.6, 8.8, 10.4.
-  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines).
+  *Source:* R8, R9, DoD. *Constrained by:* 1.2, 2.6, 5.5, 7.2, 8.4, 8.6, 8.8, 10.4.
+  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines), U9 (the
+  ninth line, and the reason it was missing).
 
 - **8.8 Startup and shutdown behaviour.** `[decided]`
   *Decision:* **the worker retries nothing itself, and handles no signal.** It exits on a broker it
@@ -3617,7 +3648,7 @@ and Part 4 of `03-roadmap.md`).
   | Service | Test | Why this one |
   |---|---|---|
   | `postgres` | `pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"` | 6.6 named `pg_isready`; the `-h` is this item's |
-  | `rabbitmq` | `rabbitmq-diagnostics ping` | 6.6 |
+  | `rabbitmq` | `rabbitmq-diagnostics -q check_port_connectivity` | 6.6; the check narrowed at U9 |
   | `api` | `python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"` | 6.6's `/health`, called with what is already in the image |
 
   *Why `-h 127.0.0.1`, which is the finest detail in this item and the one that would have bitten.*
@@ -3629,6 +3660,43 @@ and Part 4 of `03-roadmap.md`).
   answers the question the dependent service is actually asking. The user and database come from the
   container's own environment (10.1), so a reviewer who overrides them does not break the check;
   `$$` is Compose's escape for a literal `$`.
+  *Measured at U9, and the hazard is smaller than the paragraph above implies.* The temporary
+  server's whole life is about **160 ms** — it begins listening 1.3 s after the container starts and
+  is shut down 0.2 s later — while Docker fires the first probe one `interval` after container
+  start, at **5 s**. Removing `-h` and starting cold therefore does *not* reproduce the failure: the
+  check never meets the temporary server. What the removal did confirm is the mechanism, from
+  `pg_isready`'s own output — `/var/run/postgresql:5432` without the flag against `127.0.0.1:5432`
+  with it. **The flag stays**, because the window is real and closing it costs thirteen characters.
+  **What the numbers are recorded for is the `interval`:** the protection today is the flag *and* a
+  probe cadence thirty times the window, so lowering `interval` toward 1 s walks the first probe
+  into the hazard — which is not the sampling-rate change it looks like.
+  **The broker's check was `rabbitmq-diagnostics ping` until U9 ran it, and `ping` answers a
+  narrower question than the dependent asks — the same fault `-h` closes above, on the other
+  service.** The tool's own help states what it checks: *"that the node OS process is up,
+  registered with EPMD and CLI tools can authenticate with it"*. It says nothing about a listener,
+  and the AMQP listener opens well after the node is reachable.
+  *Measured from a cold start, sampling both checks in one loop:*
+
+  | | `ping` | `check_port_connectivity` |
+  |---|---|---|
+  | 02:49:15.958 | fails | fails |
+  | 02:49:18.459 | **passes** | fails |
+  | 02:49:23.696 | **passes** | fails |
+  | 02:49:25.375 | passes | passes — the log's `started TCP listener on [::]:5672` is 23:49:25.606 |
+
+  **Seven seconds in which `condition: service_healthy` releases a dependent onto a closed port.**
+  Unlike the postgres window above, which is 162 ms behind a 5 s interval and is never reached,
+  **this one was observed in the product**: the worker started early, took `ConnectionRefusedError`,
+  logged `event=broker_unreachable`, exited `1` and came back on 11.11's policy with
+  `RestartCount=1` — which is precisely the run of `ERROR` lines and the restart count this item
+  took the broker edge to prevent. It is intermittent because the worker also waits on `schema`, so
+  whether it loses depends on how fast postgres and the one-shot happen to be — 4.6's own warning
+  about a window that passes here and fails on the reviewer's machine.
+  `check_port_connectivity` is *"Basic TCP connectivity health check for each listener's port"* and
+  reports `Successfully connected to ports 5672, 15692, 25672`, which is the question the worker
+  asks. It costs 0.93–1.03 s against `ping`'s 0.78 s, inside the 10 s `timeout` below with room.
+  `-q` suppresses the tool's banner, which would otherwise land in the check's output.
+
   *Why the API's check is a `python -c` and not `curl`:* the base is `python:3.x-slim` (3.7), which
   ships no `curl`. The alternative is a package in the image every service ships, added for a
   diagnostic — against one line using the interpreter that is already the reason the image exists.
@@ -3881,7 +3949,7 @@ and Part 4 of `03-roadmap.md`).
   # The package itself; its dependencies are already installed and pinned above.
   COPY pyproject.toml .
   COPY src/ ./src/
-  RUN pip install --no-cache-dir --no-deps .
+  RUN pip install --no-cache-dir --no-deps . && rm -rf build
 
   USER app
   CMD ["uvicorn", "pizza.entrypoints.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -3909,6 +3977,16 @@ and Part 4 of `03-roadmap.md`).
   `ruff` and `mypy` in the image the API runs, which is the one thing 3.7 split the stages to
   prevent. *Rejected — `pip install --user`:* `app` is a system account with no home, and it would
   split the install across two locations.
+
+  *Why `rm -rf build`, which 2.9's sketch does not have.* `pip install .` builds in place, and
+  setuptools leaves its intermediate tree at `/app/build/lib/pizza/` — every module a second time,
+  in an image built on 3.3's premise that the installed distribution in `site-packages` is the only
+  copy that runs. It is deleted in the layer that creates it, so it costs no layer and no build time.
+  **Measured rather than argued:** with the tree present, `ruff check .` inside `pizza-test` reports
+  35 `TID251` violations, because the per-file ignores are keyed to `src/pizza/infrastructure/*`
+  while the copy sits at `build/lib/pizza/infrastructure/*`. That is one of the two commands 12.10
+  offers a reviewer; **the removal is decided on the stray copy and not on that command**, which
+  13.4 may or may not document.
 
   *Why `/app` is owned by `app`, folded into the `adduser` layer rather than given a `chown` of its
   own.* `pytest` writes its cache into the rootdir, which is `/app` itself and not the `tests/`
