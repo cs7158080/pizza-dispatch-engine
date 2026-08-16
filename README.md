@@ -20,12 +20,16 @@ That builds the image on the first run, then starts PostgreSQL, RabbitMQ, a one-
 creates the database schema, the API, and the dispatch worker. It needs no setup and no `.env`
 file: every value has a working default.
 
-Once the stack is healthy, the integration suite runs against it and prints an unmissable `PASS` or
-`FAIL` separator into the same stream. **The stack stays up afterwards** — only the test service
-exits, and the system is left running for you to drive.
+**The first launch takes about four minutes**, nearly all of it building the image. Every launch
+after that reaches the test verdict in under a minute.
+
+Once the broker and the API are healthy, the integration suite runs against the system that was
+just started and prints an unmissable `PASS` or `FAIL` separator into the same stream. It runs once
+and exits, and **everything else stays up either way** — a failing suite leaves you a system to
+look at rather than a torn-down one.
 
 The database and the broker are deliberately kept out of this stream, so what you see is the API,
-the worker and the tests. Their logs are still collected — `docker compose logs postgres`.
+the worker and the test run. Their logs are still collected — `docker compose logs postgres`.
 
 The API is published on the host at **http://localhost:8000**:
 
@@ -35,7 +39,8 @@ The API is published on the host at **http://localhost:8000**:
 If port 8000 is already taken, copy `.env.example` to `.env` and set `API_HOST_PORT` to something
 else. Nothing inside the environment changes; only the host side moves.
 
-After changing source, rebuild with `docker compose up --build`.
+After changing anything under `src/` or `tests/`, rebuild with `docker compose up --build`: the
+images carry their own copy of the code, so a launch without it runs what was there before.
 
 **As a CI-style gate**, where what matters is an exit code rather than a demonstration, launch
 detached and then wait on the test service:
@@ -116,7 +121,8 @@ immediately and steps 7 and 8 have nothing to do. Neither is a failure.
 ## Tests
 
 The suite runs automatically on every `docker compose up`, against the live stack, and prints its
-verdict into the launch stream. Four scenarios, driven entirely over HTTP:
+verdict into the launch stream. Five test functions covering four scenarios, driven entirely over
+HTTP:
 
 | Scenario | What it covers |
 |---|---|
@@ -137,6 +143,9 @@ docker compose run --rm tests pytest tests/integration -k lifecycle
 **No report file is written.** Adding `--junit-xml=<path>` to the test service's command would
 produce one; it is left out because nothing in this project reads it, and it would hold less than
 the logs above already do.
+
+Beside it, `tests/unit` holds pure-logic tests that need nothing running. They are not part of the
+launch, and are not counted among the four scenarios above.
 
 **The suite is deterministic on a clean `docker compose up`.** It registers its own drivers and
 leaves none behind, so it can be re-run. What it cannot be isolated from is the driver pool, which
