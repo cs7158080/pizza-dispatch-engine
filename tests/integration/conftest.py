@@ -3,6 +3,9 @@
 The suite speaks HTTP and nothing else, so the client is the only fixture holding
 state. Names exist for whoever reads the data afterwards; tests identify their rows
 by the id the API returned, never by name.
+
+The run's verdict is also written from here, because the suite is started by a
+container whose output is read rather than by a command someone typed.
 """
 
 import os
@@ -15,6 +18,19 @@ import pytest
 from pizza.config import load_client_settings
 
 from .waiting import wait_until
+
+
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter, exitstatus: pytest.ExitCode
+) -> None:
+    """Write the run's verdict as a separator wide enough not to be scrolled past.
+
+    Keyed on the exit status rather than on a count of failures, so a run that
+    collected nothing reports FAIL instead of printing a green banner over an empty
+    suite. It only prints; the exit status the run returns is untouched.
+    """
+    verdict = "PASS" if exitstatus == pytest.ExitCode.OK else "FAIL"
+    terminalreporter.write_sep("=", verdict)
 
 
 @pytest.fixture(scope="session")

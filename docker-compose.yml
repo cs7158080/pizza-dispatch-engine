@@ -97,6 +97,23 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # Runs once at launch and exits, leaving the rest of the stack up. No restart key:
+  # a restart would re-run the suite indefinitely, and `docker compose wait tests`
+  # reads the exit of a service that is expected to stay exited.
+  tests:
+    build:
+      context: .
+      target: test
+    image: pizza-test
+    command: ["pytest", "tests/integration", "-v", "-ra", "--durations=0", "--tb=short"]
+    environment:
+      PIZZA_API_BASE_URL: ${PIZZA_API_BASE_URL:-http://api:8000}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
   # Not started by `up`: an interactive prompt loop with no terminal reads EOF and
   # exits. Run it with `docker compose run --rm cli`, which attaches a terminal.
   cli:

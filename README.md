@@ -14,8 +14,14 @@ That builds the image on the first run, then starts PostgreSQL, RabbitMQ, a one-
 service that creates the database schema, the API, and the dispatch worker. It needs no
 setup and no `.env` file: every value has a working default.
 
+Once the API is healthy, the integration suite runs against the system that was just
+started and prints `PASS` or `FAIL` in the same stream. It runs once and exits;
+everything else stays up either way, so a failing suite leaves you a system to look at
+rather than a torn-down one. See *Tests* below.
+
 The database and the broker are deliberately kept out of this stream, so what you see is
-the API and the worker. Their logs are still collected — `docker compose logs postgres`.
+the API, the worker and the test run. Their logs are still collected —
+`docker compose logs postgres`.
 
 The API is published on the host at **http://localhost:8000**:
 
@@ -69,7 +75,9 @@ Two sets, in two directories, run separately.
 started.
 
 **`tests/integration`** — five test functions covering four scenarios, driven entirely over
-HTTP against a running stack. With the system up, from another terminal:
+HTTP against a running stack. These run by themselves at every `docker compose up`, as a
+one-shot `tests` service. To run them by hand instead, with the system up, from another
+terminal:
 
 ```
 PIZZA_API_BASE_URL=http://localhost:8000 pytest tests/integration
@@ -85,6 +93,20 @@ PIZZA_API_BASE_URL=http://localhost:8000 pytest tests/integration
 The suite registers its own drivers and leaves none behind, so it can be run repeatedly.
 Running it against a stack you have been driving by hand may observe drivers you registered
 yourself; `docker compose down` resets it.
+
+To get the launch's result as an exit code — for CI, or any scripted check — start the
+stack detached and wait on the test container:
+
+```
+docker compose up -d
+docker compose wait tests
+```
+
+`docker compose wait` returns that container's exit code: `0` when the suite passed. The
+stack is still running afterwards; `docker compose down` stops it.
+
+After changing anything under `tests/`, rebuild before the next launch with
+`docker compose up --build` — the image carries its own copy of the suite.
 
 ## Configuration
 
