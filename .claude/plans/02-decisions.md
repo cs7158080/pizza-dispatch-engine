@@ -3571,7 +3571,7 @@ and Part 4 of `03-roadmap.md`).
   | `schema` | `pizza-runtime`, one-shot | 4.6, which writes both the service and its name |
   | `api` | `pizza-runtime` | 3.7; the name by 10.1's `http://api:8000` |
   | `worker` | `pizza-runtime` | 3.7; the name by 4.6's diagram |
-  | `tests` | `pizza-test` (`target: test`) | 3.7, 11.3; the name by 11.4's `--exit-code-from tests` |
+  | `tests` | `pizza-test` (`target: test`) | 3.7, 11.3; the name by 11.4's `docker compose wait tests` |
   | `cli` | `pizza-runtime`, `profiles: ["cli"]` | 9.3, which writes `docker compose run --rm cli` |
 
   *Every name in the third column is already load-bearing somewhere else* — inside a URL our code
@@ -3827,15 +3827,51 @@ and Part 4 of `03-roadmap.md`).
 - **11.4 Behaviour when tests fail.** `[decided]`
   *Decision:* plain `docker compose up` does **not** tear the stack down on failure; the
   failure is visible as the test service's non-zero exit and its printed summary. The README
-  additionally documents `docker compose up --abort-on-container-exit --exit-code-from tests`
-  as the CI-style gate that propagates the exit code.
-  *Why:* the two goals are mutually exclusive in one command — `--exit-code-from` stops every
-  container as soon as the tests finish, which would leave nothing running to demonstrate
-  (R11). Giving each goal its own documented command satisfies both instead of half-satisfying
-  each.
-  *Rejected:* making `--exit-code-from` the default launch command — it makes the CLI
-  deliverable undemonstrable straight after launch.
-  *Source:* R15, R19. *Answers:* Q8.
+  additionally documents the CI-style gate that propagates the exit code, and it is **two
+  commands**:
+
+  ```
+  docker compose up -d
+  docker compose wait tests
+  ```
+
+  *Why two.* `docker compose wait` blocks until the named service's container stops and returns
+  that container's exit code — which is the whole of what a gate needs, and it names the service
+  it reads. Separating the launch from the wait is what makes the code reachable at all: every
+  single-command form Compose offers reads the **first** container to exit, and that is not this
+  one.
+  *What it costs:* the stack is left running, so a gate that wants it gone ends with
+  `docker compose down`. Against the form this replaces that is a gain rather than a cost —
+  11.5 requires the stack to stay up, and the old command tore it down.
+
+  **This item named `docker compose up --abort-on-container-exit --exit-code-from tests` until
+  2026-08-16, and that command does not do what this record claimed it did.** The premise was
+  that `--exit-code-from` *"stops every container as soon as the tests finish"*. It stops every
+  container as soon as **any** container exits, and 11.1's `schema` is a one-shot that exits
+  zero while `tests` is still waiting on 11.2's `api` edge. Measured on Compose v2.31.0 against
+  a shape matching that graph — a one-shot completing, and a runner depending on its completion:
+
+  | Command | What happened | Exit |
+  |---|---|---|
+  | `--abort-on-container-exit --exit-code-from runner` | aborted at the one-shot's exit; the runner was stopped mid-run | `1` — red on a healthy system |
+  | the same, with the runner not yet started | the runner was killed before it ran at all | **`0` — green over a suite that never ran** |
+  | `--exit-code-from` alone | identical: the flag implies the other | **`0`** |
+  | `--abort-on-container-failure`, runner failing | correct — the zero exit is ignored, the runner completes, the failure propagates | `1` |
+  | `--abort-on-container-failure`, runner passing | **never returns** — nothing failed, so nothing aborts | — |
+
+  **The third row is 12.9's failure arriving by another door.** That item chose a hook over a
+  shell wrapper because `pytest … || echo FAIL` exits zero, so *"the CI gate would be green
+  forever and nothing would say so"*. The hook cannot be broken from inside pytest — but it can
+  be bypassed entirely by a Compose flag that stops the container before pytest reaches its
+  summary.
+  *Rejected — `--abort-on-container-exit`, with or without `--exit-code-from`:* the table.
+  *Rejected — `--abort-on-container-failure`:* right in one direction and non-terminating in the
+  other, which in a gate is worse than a wrong answer.
+  *Rejected — making the gate the default launch command:* it makes the CLI deliverable
+  undemonstrable straight after launch. This is the original form of the rejection and the one
+  part of this item measurement left standing.
+  *Source:* R15, R19. *Answers:* Q8. *Amended:* 2026-08-16, on measurement rather than on a new
+  argument; 11.1, 11.10, 11.11 and 12.9 carry the command's name and are amended with it.
 
 - **11.5 Behaviour after tests pass.** `[decided]`
   *Decision:* the stack **stays up**. Only the test service exits.
@@ -4084,8 +4120,8 @@ and Part 4 of `03-roadmap.md`).
   conditions; all three are confirmed.
 
   *Where the number comes from, and why it is above the true minimum.* Of the features in use,
-  `attach:` is the newest at **v2.20** — `profiles`, long-form `depends_on` and
-  `service_completed_successfully` are all older, and 11.4's `--exit-code-from` and Compose's
+  `attach:` and 11.4's `docker compose wait` are the newest, both at **v2.20** — `profiles`,
+  long-form `depends_on` and `service_completed_successfully` are all older, and Compose's
   `${VAR:-default}` interpolation older still. **v2.24 is named deliberately above that floor**, on
   two grounds: it is the one Compose version already written in this record (10.3), so the repository
   states one floor rather than two; and a prerequisite errs safely upward — a reviewer above it loses
@@ -4145,7 +4181,7 @@ and Part 4 of `03-roadmap.md`).
   that restarts never reaches one — the whole stack would hang instead of failing. It is also what
   4.6 asked for: a failed schema creation should be **one service's clear non-zero exit**, not a
   loop. For `tests`, a restart would re-run the suite indefinitely and break 11.4's
-  `--exit-code-from tests`, which reads the exit of a service that is expected to stay exited.
+  `docker compose wait tests`, which reads the exit of a service that is expected to stay exited.
 
   *What this does not cover, stated so nothing is assumed:* a container that is alive and not working.
   6.6 already recorded the mechanism — plain Compose does not restart an unhealthy container, and a
@@ -4650,7 +4686,7 @@ and Part 4 of `03-roadmap.md`).
   | `--tb=short` | the failing assertion and its values, without a full traceback in a shared stream |
 
   *Why the banner is a hook and not a shell wrapper around the command.* 11.4 rests entirely on
-  pytest's exit status reaching `--exit-code-from tests`, and every shell form that prints a
+  pytest's exit status reaching `docker compose wait tests`, and every shell form that prints a
   banner is a place to lose it — `pytest … || echo FAIL` exits **zero**, so the CI gate would be
   green forever and nothing would say so. The hook cannot break it: it prints beside the exit
   status instead of between it and Compose. It also reads that status directly, so a run that
