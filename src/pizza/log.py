@@ -15,5 +15,9 @@ def configure_logging(level: str) -> None:
 
     Called first thing in a composition root, and once: basicConfig does nothing
     if the root logger already has a handler.
+
+    `pika` is raised to WARNING because it narrates a successful publish and a
+    successful reconnect at INFO, several lines each. Its own errors still print.
     """
     logging.basicConfig(level=level, format=_FORMAT)
+    logging.getLogger("pika").setLevel(logging.WARNING)

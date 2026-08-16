@@ -25,13 +25,13 @@ status markers, precisely so that this table cannot be contradicted.
 | 6 — API contract | 6.1–6.9 | — |
 | 7 — Broker contract | 7.1–7.7 | — |
 | 8 — Worker | 8.1–8.9 | — |
-| 9 — CLI | 9.2, 9.3, 9.6 | 9.1, 9.4, 9.5 |
+| 9 — CLI | 9.1–9.6 | — |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.1–11.11 | — |
 | 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.5, 12.8 |
 | 13 — Documentation | 13.1–13.6 | — |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **105** | **6** |
+| **Total** | **108** | **3** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -2895,6 +2895,7 @@ and Part 4 of `03-roadmap.md`).
   |---|---|---|
   | `event=worker_ready` | `INFO` | 8.8 |
   | `event=dispatch_notification order_id driver_id driver_name at` | `INFO` | 8.6 |
+  | `event=nothing_to_do order_id` | `INFO` | 5.5's idempotence |
   | `event=no_driver_available order_id attempt` | `WARNING` | 8.2's cycle |
   | `event=dispatch_failed order_id` | `ERROR` | 8.3 |
   | `event=poison_message body` | `ERROR` | 8.4 |
@@ -2902,11 +2903,40 @@ and Part 4 of `03-roadmap.md`).
   | `event=dispatch_error order_id`, with the traceback | `ERROR` | 8.4 |
   | `event=broker_unreachable` · `event=broker_connection_lost` | `ERROR` | 8.8 |
 
+  **`event=nothing_to_do` was added at U9, after driving the environment by hand.** This table
+  originally left the idempotent path silent, and 1.2's step 10 promises the opposite — it carries
+  the `T1:` prefix that sends a reviewer to watch terminal 1, exactly as steps 6 and 8 do, for the
+  second publish that *"worker acks, changes nothing"*. With no line there is nothing to watch, and
+  a reviewer following the demo path cannot tell a correctly ignored event from a lost one. The two
+  records had disagreed since the table closed. `INFO` rather than `WARNING`, because unlike the
+  no-driver cycle this is a correct and final outcome, which is 8.6's level.
+  *Named `nothing_to_do` and not `already_assigned`:* the outcome comes from
+  `not order.can_be_assigned()`, which covers an order already delivered as well as one already
+  assigned, so the narrower name would be false on the terminal path. Mapping the line 1:1 onto
+  `DispatchOutcome` is also what keeps the two from drifting.
+
   `WARNING` rather than `INFO` for the no-driver rejection, because those are the lines a reviewer
   is meant to watch: 1.2's steps 7 and 8 are 64 seconds of that cycle, and they should not read as
-  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output,
-  and no per-library level is curated, since a filtered module list is configuration with no
-  reader.
+  routine. **We emit nothing at `DEBUG`** — the level exists to turn on the libraries' own output.
+
+  **One per-library level is curated, and this record originally refused to curate any.** The ground
+  was that a filtered module list is *"configuration with no reader"*. That claim did not survive
+  the environment being driven by hand at U9. `pika` narrates at `INFO`, and the api holds a
+  long-lived publisher connection whose heartbeats nothing services between requests (7.7's stated
+  asymmetry with the worker) — so RabbitMQ closes it after 60 s of idle, and the next `PATCH` finds
+  a reset socket. 7.5's single reconnect then does its job in about 40 ms and loses nothing, but it
+  prints roughly twenty-five lines and two tracebacks on the way. 1.2's demo path is thirteen steps
+  a person types, so an idle minute is certain and a reviewer meets that wall in the stream steps 6,
+  8 and 10 send them to watch. **The reader the original argument said did not exist is the reviewer
+  1.2 is built around.**
+  `logging.getLogger("pika").setLevel(logging.WARNING)`, in `configure_logging` beside the format —
+  one line, and the list stays at one entry. **`WARNING` and not `CRITICAL`:** `pika`'s own `ERROR`
+  records survive, so a broker that is genuinely unreachable still prints before 8.8's exit.
+  *Rejected — `heartbeat=0` on the publisher's `URLParameters`,* which would stop the disconnect
+  rather than the narration of it: it reopens 7.7 and leaves a genuinely dead connection undetected
+  until the next publish. *Rejected — leaving it and describing the wall in the README:* it explains
+  a red block instead of removing one, in the one stream 11.1's `attach: false` exists to keep
+  clean.
   *`at=` is not a duplicate of `asctime`:* it is when the assignment happened, taken from the
   `Clock` and written to the database, against when the line was emitted.
 
@@ -2930,8 +2960,9 @@ and Part 4 of `03-roadmap.md`).
 
   *Roadmap consequence, recorded rather than assumed:* U7 builds `pizza/log.py` because it is the
   first entrypoint, so `8.7` joins U7's *Decided by* cell in Part 4.
-  *Source:* R8, R9, DoD. *Constrained by:* 2.6, 7.2, 8.4, 8.6, 8.8, 10.4.
-  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines).
+  *Source:* R8, R9, DoD. *Constrained by:* 1.2, 2.6, 5.5, 7.2, 8.4, 8.6, 8.8, 10.4.
+  *Completes:* 8.4's truncation. *Realised in:* U7 (the module), U8 (the worker's lines), U9 (the
+  ninth line, and the reason it was missing).
 
 - **8.8 Startup and shutdown behaviour.** `[decided]`
   *Decision:* **the worker retries nothing itself, and handles no signal.** It exits on a broker it
@@ -3030,39 +3061,129 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 9 — CLI
 
-- **9.2 Menu actions.** `[decided]` · **reopen requested for U12's gate, 2026-08-12**
+- **9.1 Interaction style.** `[decided]`
+  *Decision:* a **numbered menu loop** — the menu is printed, a digit is read, the action runs, and
+  the menu is printed again. Built from `input()` and `print()` alone, since 2.10 approves no CLI
+  library; one prompt per field; blocks delimited as below.
 
-  **The developer has asked to re-decide the status action.** The record below stands and
-  governs until U12's gate revisits it — this is a request to re-open, not a repeal, and no
-  other unit is affected: the core takes a requested status and decides, and does not care who
-  chose it or how. What is reopened is the fourth action alone — whether the CLI offers all five
-  status values, or a single "advance" that moves the order to the next one.
-  *What any new form has to answer, because neither objection has gone away:* it must not put
-  5.1's transition sequence inside the client, which 3.6 forbids in one sentence; and it must
-  leave the `409` path reachable from the interface a reviewer is handed, or 5.2 becomes
-  something read about rather than demonstrated.
+  *Why not the two alternatives.* **Sub-commands** (`cli place-order --customer …`) contradict 9.3:
+  each action would be its own `docker compose run`, so 1.2's steps 3–12 become ten container starts
+  and 9.5 has no process left to remember anything in. It is also the only one of the three needing
+  argument parsing. **A prompt-driven shell** — command words inside a loop — needs a parser and a
+  `help` screen, and buys flexibility nobody needs at one user and five actions. The menu is the
+  only form where what can be done is on the screen rather than in the user's memory.
 
+  *Frames, aligned columns and colour are built, and they fail 1.1's ceiling test.* Delete them and
+  no named DoD row falls; they are presentation. **They ship on the developer's decision that the
+  deliverable is also read by eye**, and the exception is recorded here rather than absorbed
+  silently, because 1.1's value is that it can be pointed at. What bounds it:
+  1. **Blocks are delimited by horizontal ASCII rules** — a title, a rule of `-`, the content, a
+     rule. **No vertical pipes:** a closed box needs every line padded to one width, and 4.2's
+     200-character address and 6.3's variable `detail` sentence would break the right edge — a
+     broken box reads worse than none. The rule spans the widest line in its block, so no width
+     constant exists to tune.
+  2. **ASCII only.** Box-drawing characters are Unicode and are exactly 9.6's class of failure.
+  3. **Aligned columns in one place** — the order list (6.6), where rows repeat. A single order stays
+     `key: value` lines; a one-row table is not a table. Widths are computed from the data, and
+     nothing is truncated.
+  4. **Four colour constants** — red for failure, green for success, bold for titles and prompts,
+     reset. No colour per status value. They are ANSI escape sequences written directly, so 2.10
+     does not move.
+  5. **Guarded by `sys.stdout.isatty()`** — when the output is not a terminal the four constants are
+     empty strings, so a redirected stream carries no escape codes.
+  6. **No variable disables colour.** 10.1 requires a decision record and the `PIZZA_` prefix for a
+     new variable, and there is nothing here to tune; the guard is the whole mechanism.
+  *Residual risk, stated:* a console that does not interpret ANSI shows `←[31m` instead of colour.
+  9.6 already directs the reviewer to PowerShell or CMD, and A21 makes that a README line, not code.
+  *Excluded on the same test:* screen clearing, command history, completion.
+  *The menu carries the same frame as the answers*, so the screen reads as one sequence of blocks.
+
+  *Two behaviours that belong to the loop and not to 9.4, because neither becomes a request:* an
+  unusable menu choice prints one line and loops; **`EOF` and `Ctrl-C` exit as `quit` does**, status
+  `0`. The second is not tidiness — 9.3 describes precisely the container that reads `EOF` at its
+  first prompt, and without two `except` clauses that arrives as a traceback.
+
+  *Source:* R11, DoD "Interactive CLI". *Constrained by:* 1.1, 1.2, 2.10, 9.3, 9.6, 10.1.
+  *Constrains:* 9.2, 9.4, 9.5. *Realised in:* U12.
+
+- **9.2 Menu actions.** `[decided]` · *fourth action re-decided at U12's gate, 2026-08-14*
   *Decision:* five actions —
   1. place an order
   2. register a driver
   3. list orders and select one (by customer name, via `GET /orders` — A14)
-  4. update the selected order's status — the user picks from the five values
+  4. update the selected order's status — the user picks from the five values, in a sub-menu that
+     draws the chain and marks where the order stands
   5. quit
+
   *Why status update is included:* the entire behaviour of the system is dispatch triggered by
-  `BAKING`. Without it the CLI demonstrates half a product — create an order, register a
-  driver, then reach for `curl` to make anything happen. The DoD asks for a client that
-  "allows manual interaction with the running API services", not for the three calls named in
-  R11, and the demo path (1.2) does not run without it.
-  *Why the menu offers all five statuses rather than only the legal next one:* because the chain
-  is strictly linear (A3), exactly one of the five is legal at any moment, and a single
-  `Advance to BAKING` action was the obvious simplification. It was rejected on two counts. It
-  would place the transition sequence 5.1 owns inside the client, which 3.6 forbids; and it
-  would make the `409` path unreachable from the CLI, so a reviewer could never see the system
-  refuse an illegal transition through the interface they were handed. Offering all five keeps
-  the client free of business knowledge and makes 5.2 demonstrable rather than merely described.
-  *Accepted cost:* at any moment four of the five choices return `409`. The error is displayed,
-  not hidden — and showing it is part of the point.
-  *Source:* R11, R19. *Answers:* Q19.
+  `BAKING`. Without it the CLI demonstrates half a product — create an order, register a driver,
+  then reach for `curl` to make anything happen. The DoD asks for a client that "allows manual
+  interaction with the running API services", not for the three calls named in R11, and the demo
+  path (1.2) does not run without it.
+
+  *The reopen, and what it found.* The developer asked to re-decide the fourth action against a
+  single "advance" that moves the order to the next status. **No form of `advance` survives the two
+  conditions the reopen itself set** — the client must not hold 5.1's sequence, and 5.2's `409` must
+  stay reachable from the interface a reviewer is handed:
+
+  | Form | Fails on |
+  |---|---|
+  | The client computes the next status from a list it holds | 5.1's sequence executing in an adapter, which 3.6 rejects by name — and the `409` becomes unreachable |
+  | The API publishes the next status as a field | A change to 6.1's nine keys with topic 6 closed; and the `409` still needs the five kept selectable, so `advance` is an extra action rather than a smaller menu |
+  | Trying values until one succeeds | Four rejected requests per move |
+
+  Recorded as **FW18**, where the second route is named as the one worth taking.
+
+  *What the reopen did change — the presentation, which is where the real objection was.* The menu
+  now shows the chain with the order's position marked, above the five choices:
+
+  ```
+  RECEIVED → PREPARING → [ BAKING ] → READY → DELIVERED
+  ```
+
+  The current status is echoed from the response the CLI has just read (9.5), not computed. The five
+  values are listed in the order the contract publishes them — `OrderStatus` declares them in chain
+  order and FastAPI carries declaration order into the generated document — so the reviewer sees
+  what comes next without the client asserting it, and every one of the five stays selectable, which
+  is what 1.2's step 11 needs.
+
+  *The line this rests on, because the client does hold the order and pretending otherwise is
+  false.* The developer's objection was that a list in chain order **is** the sequence, and it is.
+  What separates the permitted form from the forbidden one is not knowledge but authority:
+
+  > The list is displayed and selected from. **The number that picks from it comes from the user's
+  > keystroke alone, and is never derived from another status.**
+
+  `STATUSES[choice - 1]` is permitted — the position came from a person. `STATUSES[index(current) + 1]`
+  is not — the client has decided which status follows which. The practical difference is that a
+  stale display leaves the user every option and the API adjudicates, while a stale computation
+  substitutes the client's judgement and removes the alternatives.
+
+  *Where the five names live, and why it is a constant rather than a call.* `OrderStatus` exists in
+  `domain/order.py`, and the CLI may not import it: 3.6 rejects a client that imports the core,
+  because `domain/` would then serve two consumers and an API change could no longer be verified
+  through the API alone. Reading the names at runtime from the generated OpenAPI document was
+  rejected as a network call, a JSON traversal and a failure path bought for five strings, and 1.2
+  keeps the demo to one tool. **What ships is a module-level constant of five strings in
+  `entrypoints/cli/`** — which 3.6 already permits, listing the status names among the published
+  contract a client must hold to call the API at all.
+  *The cost, stated:* a second copy of the five names exists and nothing checks that it agrees with
+  `domain/order.py`. Drift produces a `422` (6.1), which is a visible error rather than a wrong
+  state — 3.6's own test, answered on the harmless side.
+  *Rejected — a constants module shared with 12.3's suite:* a speculative abstraction for five
+  strings, and a test that imports the constant it asserts against asserts nothing.
+
+  *Accepted cost, at its real size.* Every choice is still the user's, and four of the five return
+  `409` at any moment. The diagram removes the guessing, not the arithmetic. The error is displayed
+  rather than hidden, and showing it is part of the point.
+  *Corrected while re-deciding:* 6.3 claims its `409` message "tells them what to do next". It names
+  the current status and the rejected one — *"Cannot advance order from BAKING to PREPARING"* — and
+  does not name the legal successor. The diagram is what does that work now.
+
+  *A sub-menu, not five more top-level entries*, so the main menu stays the five lines 1.2 walks.
+  *Left to 9.5:* what happens when the fourth action is chosen with no order selected.
+  *Source:* R11, R19. *Constrained by:* 1.1, 1.2, 3.6, 5.1, 5.2, 6.1, 6.3, 9.1. *Constrains:* 9.4,
+  9.5. *Answers:* Q19. *Defers:* FW18.
 
 - **9.3 How the CLI is run.** `[decided]`
   *Decision:* **`docker compose run --rm cli`.** The CLI is a service in the one compose file,
@@ -3075,9 +3196,11 @@ and Part 4 of `03-roadmap.md`).
   *Why it is not started by `up`:* the api and the worker are daemons and nothing types at them;
   the CLI is an interactive foreground program whose whole body is a prompt loop. A service
   without `profiles` starts at `up` with no terminal attached, reads EOF from stdin at its first
-  prompt, and exits — printing a failed container into the very stream 11.3 puts the PASS/FAIL
+  prompt, and exits — printing an exited container into the very stream 11.3 puts the PASS/FAIL
   summary in. `profiles` is two words meaning "not at `up`"; in every other respect the service
   is defined exactly as the api and the worker are.
+  *Corrected on 2026-08-16:* this sentence read "a failed container". 9.1 makes `EOF` exit `0`,
+  so the container exits successfully — the noise argument and the decision are unchanged.
 
   *Checked against the brief, because the wording is close:* R14 asks for one
   `docker-compose.yml` launching **API, worker, broker, and database** — the CLI is not on that
@@ -3098,6 +3221,80 @@ and Part 4 of `03-roadmap.md`).
   *Assumption:* `profiles` requires Compose v2; 11.10 confirms it.
   *Source:* R11, R14, R16. *Constrained by:* 3.6, 9.2, 9.6. *Constrains:* 1.2, 11.8.
   *Feeds:* 3.7, 11.1.
+
+- **9.4 Validation and error presentation.** `[decided]`
+  *Decision:* **the CLI validates no content at all.** It sends what it was given and renders what
+  comes back, in three shapes: an API error, a transport failure, and an unexpected response.
+
+  *Why nothing is validated locally.* 4.2's bounds — 100, 200, 1-to-20 — would then be written in
+  two places, and 13.6's drift is what follows. This repository already declined the same trade once
+  for the same reason: `VARCHAR(n)` was rejected on the database columns because *a type does not
+  drift, a bound written twice does*. **Nor is "just emptiness" an exception:** 4.2 states
+  `non-empty` in the same line it states `≤ 100`, so there is no principle separating them, only an
+  impression that one is smaller. *Cost:* a typo costs one round trip and an error screen.
+  *What this answers, which 9.1 left open:* an empty items list is sent and returns `422` like
+  anything else. There is no special case.
+  *Not validation, and decided elsewhere:* an unusable menu choice (9.1) and the fourth action with
+  nothing selected (9.5). Neither becomes a request.
+
+  *Two error bodies, because 6.3 defines two.* `detail` is a sentence on `404`, `409` and `503`, and
+  a list of per-field objects on `422` — 6.3 states that its type varies with the class of failure.
+  A sentence is printed as it stands. A `422` is flattened to one line per entry, `loc` without its
+  leading `body` element and `msg`; **`type` is not shown**, being a machine identifier for which
+  6.3 already established there is no consumer. Rendering a published shape is what 3.6 permits a
+  client to know, and a shape that changed would make the output ugly rather than wrong.
+
+  *A transport failure is a different screen, because there is no status code and no body.* The
+  block names the base URL it tried, taken from `PIZZA_API_BASE_URL` (10.1) — without it the
+  reviewer knows only that nothing worked, not what was addressed. This closes the question 9.3
+  handed here. **An unexpected status** — anything outside 6.2's table, `500` first among them — is
+  shown with its code and its raw body, labelled as unexpected: 6.2 calls a `500` a defect rather
+  than a contract, and a screen that dresses it as an ordinary error hides the one thing that needs
+  to be seen.
+
+  *Every error returns to the menu.* The CLI never exits on a failed call, and **nothing is retried
+  automatically** — no requirement asks for it and 1.1 removes it.
+
+  *The client timeout is set explicitly to 15 seconds, and the number is derived.* 10.4 leaves
+  `httpx` at its own 5 s default, noting that *nothing has asked to change it*; this item is the
+  asking. 10.4 also records that 7.5 bounds a `PATCH` at **twice**
+  `PIZZA_BROKER_PUBLISH_TIMEOUT_SECONDS`, so ten seconds — which means that against an unreachable
+  broker the client would abandon a request the API answers `200` under 7.6, and report a failure
+  for an operation that succeeded. That path is not in 1.2's demo but it is the experiment 13.4
+  invites a reviewer to run, so the contradiction would be with our own documentation. Fifteen
+  clears the ten with room for connection and response, one value for every call rather than one per
+  endpoint, **and not an environment variable** — 10.1 requires a record and the `PIZZA_` prefix for
+  a new one, and a number derived from another number is not a knob.
+  *Source:* R11, `CLAUDE.md` §3. *Constrained by:* 1.1, 4.2, 6.2, 6.3, 9.1, 9.3, 10.1, 10.4.
+  *Amends:* 10.4's fixed-values row. *Realised in:* U12.
+
+- **9.5 Client-side state.** `[decided]`
+  *Decision:* **one thing is remembered — the selected order's id — in memory, for the life of the
+  process.** Selecting an order fetches it and displays it; every later screen re-reads it.
+
+  *Why the id alone and not the order it came in.* A cached order carries a status, and the worker
+  changes orders between actions — 1.2's step 9 is exactly that. 9.2's status screen prints the
+  current status, so a cache would make that line untrustworthy in the one case it exists for. An id
+  cannot go stale: an order never changes identity and none is deleted, and if one somehow were, the
+  answer is a visible `404`. *Cost:* one `GET /orders/{id}` before each screen that shows the order.
+
+  **Selection fetches and displays the order, and this is what makes 1.2's step 9 reachable.** Step 9
+  re-reads an order after the worker assigned a driver, so it needs the nested driver — which
+  `GET /orders` does not carry (6.6) and which no `PATCH` response is involved to supply. Without a
+  fetch on selection there is no menu action that can show it, and 9.2's list of five is closed. The
+  reviewer runs action 3 again.
+
+  *The rest, each in a line.* **Creating an order does not select it** — 6.1 answers `POST` with the
+  id alone, so there would be nothing to display, and `CLAUDE.md` §3 wants one explicit way to
+  select. **The fourth action with nothing selected** prints one line and returns to the menu; it
+  never becomes a request, so it belongs here and not to 9.4, and the list is not run for the user —
+  that is hidden control flow. **The list shows a selector column and four of `OrderSummary`'s five
+  fields, without the id** — 36 characters per row buying nothing once selection is by number, and
+  the full id is on the screen the selection opens. **The selector number is not an identity:** it is
+  regenerated per listing and 6.6 sorts newest first, so a new order shifts every row; what is stored
+  is the id. **Nothing is written to disk.** **The last registered driver's id is not kept** — A9
+  leaves no endpoint that accepts one.
+  *Source:* R11, `CLAUDE.md` §3. *Constrained by:* 1.2, 3.6, 6.1, 6.6, 9.1, 9.2. *Realised in:* U12.
 
 - **9.6 Windows and TTY behaviour.** `[decided]`
   Three points of friction between a Windows development host and a Linux container target,
@@ -3316,7 +3513,7 @@ and Part 4 of `03-roadmap.md`).
   | `prefetch = 1` | 8.5 decided it with a full rationale, and FW7 records that a wider window becomes actively harmful the moment there is more than one consumer. An environment knob invites exactly that setting |
   | SQLAlchemy pool sizing | 2.5 left "whether it becomes tunable" to this item. It does not: the library defaults stand, and `pool_pre_ping=True` is code, not configuration |
   | the API's internal port, `8000` | a constant in the image's command. Publishing a host port is 11.8, which may add a Compose-only variable that our code never reads |
-  | `httpx`'s client timeout | the library's own 5 s default (2.6). Nothing has asked to change it |
+  | `httpx`'s client timeout | fixed by 9.4, which sets it explicitly and derives the number. Not tunable: a value derived from another value is not a knob |
   | exchange, queue and routing-key names | 7.1 — constants. They do not differ between environments, so they are not configuration |
 
   *Source:* R16, `CLAUDE.md` §5. *Constrained by:* 1.2, 2.5, 2.6, 7.5, 8.2, 8.3, 8.5.
@@ -3451,7 +3648,7 @@ and Part 4 of `03-roadmap.md`).
   | Service | Test | Why this one |
   |---|---|---|
   | `postgres` | `pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"` | 6.6 named `pg_isready`; the `-h` is this item's |
-  | `rabbitmq` | `rabbitmq-diagnostics ping` | 6.6 |
+  | `rabbitmq` | `rabbitmq-diagnostics -q check_port_connectivity` | 6.6; the check narrowed at U9 |
   | `api` | `python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"` | 6.6's `/health`, called with what is already in the image |
 
   *Why `-h 127.0.0.1`, which is the finest detail in this item and the one that would have bitten.*
@@ -3463,6 +3660,43 @@ and Part 4 of `03-roadmap.md`).
   answers the question the dependent service is actually asking. The user and database come from the
   container's own environment (10.1), so a reviewer who overrides them does not break the check;
   `$$` is Compose's escape for a literal `$`.
+  *Measured at U9, and the hazard is smaller than the paragraph above implies.* The temporary
+  server's whole life is about **160 ms** — it begins listening 1.3 s after the container starts and
+  is shut down 0.2 s later — while Docker fires the first probe one `interval` after container
+  start, at **5 s**. Removing `-h` and starting cold therefore does *not* reproduce the failure: the
+  check never meets the temporary server. What the removal did confirm is the mechanism, from
+  `pg_isready`'s own output — `/var/run/postgresql:5432` without the flag against `127.0.0.1:5432`
+  with it. **The flag stays**, because the window is real and closing it costs thirteen characters.
+  **What the numbers are recorded for is the `interval`:** the protection today is the flag *and* a
+  probe cadence thirty times the window, so lowering `interval` toward 1 s walks the first probe
+  into the hazard — which is not the sampling-rate change it looks like.
+  **The broker's check was `rabbitmq-diagnostics ping` until U9 ran it, and `ping` answers a
+  narrower question than the dependent asks — the same fault `-h` closes above, on the other
+  service.** The tool's own help states what it checks: *"that the node OS process is up,
+  registered with EPMD and CLI tools can authenticate with it"*. It says nothing about a listener,
+  and the AMQP listener opens well after the node is reachable.
+  *Measured from a cold start, sampling both checks in one loop:*
+
+  | | `ping` | `check_port_connectivity` |
+  |---|---|---|
+  | 02:49:15.958 | fails | fails |
+  | 02:49:18.459 | **passes** | fails |
+  | 02:49:23.696 | **passes** | fails |
+  | 02:49:25.375 | passes | passes — the log's `started TCP listener on [::]:5672` is 23:49:25.606 |
+
+  **Seven seconds in which `condition: service_healthy` releases a dependent onto a closed port.**
+  Unlike the postgres window above, which is 162 ms behind a 5 s interval and is never reached,
+  **this one was observed in the product**: the worker started early, took `ConnectionRefusedError`,
+  logged `event=broker_unreachable`, exited `1` and came back on 11.11's policy with
+  `RestartCount=1` — which is precisely the run of `ERROR` lines and the restart count this item
+  took the broker edge to prevent. It is intermittent because the worker also waits on `schema`, so
+  whether it loses depends on how fast postgres and the one-shot happen to be — 4.6's own warning
+  about a window that passes here and fails on the reviewer's machine.
+  `check_port_connectivity` is *"Basic TCP connectivity health check for each listener's port"* and
+  reports `Successfully connected to ports 5672, 15692, 25672`, which is the question the worker
+  asks. It costs 0.93–1.03 s against `ping`'s 0.78 s, inside the 10 s `timeout` below with room.
+  `-q` suppresses the tool's banner, which would otherwise land in the check's output.
+
   *Why the API's check is a `python -c` and not `curl`:* the base is `python:3.x-slim` (3.7), which
   ships no `curl`. The alternative is a package in the image every service ships, added for a
   diagnostic — against one line using the interpreter that is already the reason the image exists.
@@ -3715,7 +3949,7 @@ and Part 4 of `03-roadmap.md`).
   # The package itself; its dependencies are already installed and pinned above.
   COPY pyproject.toml .
   COPY src/ ./src/
-  RUN pip install --no-cache-dir --no-deps .
+  RUN pip install --no-cache-dir --no-deps . && rm -rf build
 
   USER app
   CMD ["uvicorn", "pizza.entrypoints.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -3743,6 +3977,16 @@ and Part 4 of `03-roadmap.md`).
   `ruff` and `mypy` in the image the API runs, which is the one thing 3.7 split the stages to
   prevent. *Rejected — `pip install --user`:* `app` is a system account with no home, and it would
   split the install across two locations.
+
+  *Why `rm -rf build`, which 2.9's sketch does not have.* `pip install .` builds in place, and
+  setuptools leaves its intermediate tree at `/app/build/lib/pizza/` — every module a second time,
+  in an image built on 3.3's premise that the installed distribution in `site-packages` is the only
+  copy that runs. It is deleted in the layer that creates it, so it costs no layer and no build time.
+  **Measured rather than argued:** with the tree present, `ruff check .` inside `pizza-test` reports
+  35 `TID251` violations, because the per-file ignores are keyed to `src/pizza/infrastructure/*`
+  while the copy sits at `build/lib/pizza/infrastructure/*`. That is one of the two commands 12.10
+  offers a reviewer; **the removal is decided on the stray copy and not on that command**, which
+  13.4 may or may not document.
 
   *Why `/app` is owned by `app`, folded into the `adduser` layer rather than given a `chown` of its
   own.* `pytest` writes its cache into the rootdir, which is `/app` itself and not the `tests/`
@@ -4421,7 +4665,7 @@ and Part 4 of `03-roadmap.md`).
   | 6 | Every launch starts from empty, and there is no second test stack | 11.6, 11.7, FW13 |
   | 7 | No schema migrations, and the condition that reverses it | 4.6, FW16 |
   | 8 | The tests assert through the contract, never through the schema | 12.3 |
-  | 9 | **No CI server, and what stands in for one** | 14.3, FW18 |
+  | 9 | **No CI server, and what stands in for one** | 14.3, FW19 |
 
   *Entry 2 is the only one carrying a command, and that is deliberate:* `docker compose stop
   rabbitmq`, then a status update — `200`, and the order stays `PENDING`. 11.11 named the command,
@@ -4568,7 +4812,7 @@ and Part 4 of `03-roadmap.md`).
   pinned by 11.1 and the wheels by 2.9, while plugins resolve to the latest compatible version
   unless all 58 in the transitive set are pinned by hand.
   **Accepted cost, unchanged:** a locally skipped check has nothing to catch it — which one author
-  carries by discipline and a team cannot, and that is the condition FW18 records as reversing it.
+  carries by discipline and a team cannot, and that is the condition FW19 records as reversing it.
 
   *Planning commits.* Phase 1 and the decisions taken before the split landed through one pull
   request from `plan/project-planning`. **Phase 2 and Phase 3 then part company, because they run
@@ -4607,7 +4851,7 @@ and Part 4 of `03-roadmap.md`).
   the step commits on the branch. **CI as a required gate** — what a gate adds is a trigger rather
   than a check, and the routes to one are priced above.
   *Source:* `CLAUDE.md` §4. *Constrained by:* 14.2, 14.4. *Answers:* 2.8's CI deferral.
-  *Feeds:* 13.4. *Deferred to:* FW18.
+  *Feeds:* 13.4. *Deferred to:* FW19.
 
 - **14.4 Unit-to-commit map.** `[decided]`
   *Decision:* **one commit per Phase 3 step; one branch and one pull request per unit.** The map
