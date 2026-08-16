@@ -4755,6 +4755,20 @@ and Part 4 of `03-roadmap.md`).
   read; a hand-written table is the same contract in a second place with nothing keeping the two
   in step.
 
+  *One section was neither kept nor deleted, and the silence had a live pointer in it.*
+  **Persistence** appears in neither the table above nor the deletion list, while 11.7 requires the
+  compose file to point at *"a README section that gives the exact lines to add if persistence is
+  wanted"* — and `docker-compose.yml` names that section by title. Deleting the heading without
+  reading 11.7 would leave a comment in a shipped file pointing at nothing. **The lines stay and the
+  heading goes:** the YAML block sits inside *Launch*, under the teardown sentence the table already
+  puts there, and the compose comment is retargeted to *Launch* in the same commit that moves it, so
+  the pointer is never dangling. 11.7 is satisfied literally — there is a README section, and it
+  gives the exact lines — and "concise" is satisfied too, since a heading is what the DoD row was
+  counting and the block is four lines of YAML under one that had to be written anyway.
+  *Rejected:* **sending the compose comment to `docs/future-work.md`** — FW13's second point wants
+  named volumes but does not carry the lines, so 11.7's requirement would go unmet by a pointer that
+  merely looks satisfied.
+
   *Why the CLI section documents no menu:* 9.1 prints the five actions on every loop, so a
   second copy could only go stale. What a reader cannot guess is the launch command and the Git
   Bash failure, and that is exactly what is written.
