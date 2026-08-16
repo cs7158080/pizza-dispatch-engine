@@ -1,15 +1,13 @@
-"""Putting an event on the wire, over one connection opened at the first publish.
+"""RabbitMQ event publisher, using one connection opened at the first publish.
 
 A lock covers the send, the confirmation and the reconnection: requests arrive on a
-thread pool and this client is not thread-safe.
+thread pool and the pika client is not thread-safe.
 
-The retry is asymmetric. The broker closes an idle connection, since heartbeats go
-unserviced between publishes — so a failure on a connection we already held is repaired
-by one fresh one, while a connection that cannot be opened at all has nothing to
-reconnect from and is reported instead.
+The retry is asymmetric. The broker closes idle connections, because heartbeats go
+unserviced between publishes, so a failure on an established connection is retried
+once on a fresh one. A connection that cannot be opened at all is reported directly.
 
-Every failure leaves as `PublishFailed`: the use case that catches it may not import a
-pika exception, so reducing them all to one named type is this module's duty here.
+Every failure leaves this module as `PublishFailed`; pika exceptions do not escape.
 """
 
 import threading
@@ -31,10 +29,10 @@ _BROKER_FAULTS = (AMQPError, OSError)
 
 
 class PikaEventPublisher(EventPublisher):
-    """Publishes to RabbitMQ over one long-lived connection.
+    """Publishes events to RabbitMQ over one long-lived connection.
 
     Construction performs no I/O, so a service starts whether or not the broker is
-    reachable. `close()` belongs to whoever built it.
+    reachable. The owner is responsible for calling `close()`.
     """
 
     def __init__(
@@ -51,7 +49,11 @@ class PikaEventPublisher(EventPublisher):
         self._channel: BlockingChannel | None = None
 
     def publish(self, event: OrderReadyEvent) -> None:
-        """Raises PublishFailed."""
+        """Publish the event, opening or reopening the connection as needed.
+
+        Raises:
+            PublishFailed: The event did not reach the broker.
+        """
         body = serialize(event)
 
         with self._lock:
@@ -68,7 +70,7 @@ class PikaEventPublisher(EventPublisher):
                 self._send_or_fail(channel, body)
 
     def close(self) -> None:
-        """Close the connection if one was ever opened. Safe to call at any time."""
+        """Close the connection if one was opened. Safe to call at any time."""
         with self._lock:
             self._discard_connection()
 
@@ -76,8 +78,8 @@ class PikaEventPublisher(EventPublisher):
         try:
             return self._open()
         except _BROKER_FAULTS as error:
-            # An open that fails part way leaves a connection behind; without
-            # this the next attempt would replace it and never close it.
+            # A partially completed open leaves a connection behind; discarding it
+            # here prevents the next attempt from replacing it without closing it.
             self._discard_connection()
             raise PublishFailed(f"could not reach the broker: {error}") from error
 
@@ -100,9 +102,10 @@ class PikaEventPublisher(EventPublisher):
         return channel
 
     def _parameters(self) -> pika.URLParameters:
-        """Bound one attempt: the socket connect, the bring-up on top of it, and the
-        broker announcing that it is stalled. A default left in place outlasts the
-        timeout the caller was promised.
+        """Build connection parameters with every timeout bounded by the configured one.
+
+        The socket connect, the connection bring-up and a broker-blocked notification
+        each carry a pika default that outlives the timeout the caller configured.
         """
         parameters = pika.URLParameters(self._broker_url)
         parameters.socket_timeout = self._publish_timeout_seconds
@@ -129,6 +132,5 @@ class PikaEventPublisher(EventPublisher):
         try:
             connection.close()
         except _BROKER_FAULTS:
-            # The connection is being thrown away; whether it closed cleanly
-            # changes nothing for the caller.
+            # The connection is being discarded; a failed close changes nothing.
             pass
