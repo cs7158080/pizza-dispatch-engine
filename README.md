@@ -61,6 +61,31 @@ uv pip compile pyproject.toml --universal --python-version 3.12 -o requirements.
 uv pip compile pyproject.toml --universal --python-version 3.12 --extra dev -o requirements-dev.txt
 ```
 
+## Tests
+
+Two sets, in two directories, run separately.
+
+**`tests/unit`** — pure logic, no running system. `pytest tests/unit`, and it needs nothing
+started.
+
+**`tests/integration`** — five test functions covering four scenarios, driven entirely over
+HTTP against a running stack. With the system up, from another terminal:
+
+```
+PIZZA_API_BASE_URL=http://localhost:8000 pytest tests/integration
+```
+
+| Scenario | What it covers |
+|---|---|
+| A complete order lifecycle | one order from `RECEIVED` to `DELIVERED`, assigned at `BAKING`, unchanged by the second event at `READY`, and its driver released at the end |
+| Recovery when a driver registers | an order that reaches `BAKING` with no driver available waits, and is dispatched once one registers — with nothing asked of the system again |
+| One driver, two orders | only one of the two is assigned, and the other is picked up when the first is delivered |
+| API rule enforcement | a skipped or repeated status change is refused with `409`, and malformed input with `422` |
+
+The suite registers its own drivers and leaves none behind, so it can be run repeatedly.
+Running it against a stack you have been driving by hand may observe drivers you registered
+yourself; `docker compose down` resets it.
+
 ## Configuration
 
 Every value the services read comes from the environment, and `docker-compose.yml` supplies

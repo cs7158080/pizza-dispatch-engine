@@ -3143,8 +3143,15 @@ and Part 4 of `03-roadmap.md`).
   now shows the chain with the order's position marked, above the five choices:
 
   ```
-  RECEIVED → PREPARING → [ BAKING ] → READY → DELIVERED
+  RECEIVED -> PREPARING -> [ BAKING ] -> READY -> DELIVERED
   ```
+
+  *Corrected on 2026-08-16:* this block was first drawn with `→`, which 9.1 forbids in the same
+  topic — its rule is **ASCII only**, and 9.6 puts a Windows console that cannot render a character
+  in the class of failure the rule exists to avoid. The arrow is not a box-drawing character, so the
+  two records disagreed rather than one being merely narrower; the diagram is what changes, because
+  it is screen output, and 9.1's rule governs screen output. The chain written as prose in 5.1, 12.2
+  and 12.3 keeps `→`: those are read in a Markdown document, not printed to a terminal.
 
   The current status is echoed from the response the CLI has just read (9.5), not computed. The five
   values are listed in the order the contract publishes them — `OrderStatus` declares them in chain
