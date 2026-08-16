@@ -126,6 +126,47 @@ def test_recovery_when_a_driver_registers(
     assert assigned["driver"]["status"] == "BUSY"
 
 
+def test_one_driver_two_orders(
+    client: httpx.Client, unique_name: Callable[[str], str]
+) -> None:
+    """One driver cannot take two orders, and the one left over gets them next.
+
+    The only scenario that composes release with retry. If the claim ignored
+    whether a driver was already busy, or failed to mark them busy in the same
+    transaction, both orders would show the same driver — the invariant spanning
+    two tables that no database constraint can hold. Delivering the assigned order
+    then proves that releasing a driver really does return them to the pool rather
+    than merely flipping a status, and that the waiting message comes back.
+    """
+    driver_id = _register_driver(client, unique_name("driver"))
+    order_ids = [_place_order(client, unique_name(f"order{n}")) for n in (1, 2)]
+    for order_id in order_ids:
+        assert _advance(client, order_id, "PREPARING").status_code == 200
+        assert _advance(client, order_id, "BAKING").status_code == 200
+
+    def either_order_has_a_driver(order: dict[str, Any]) -> bool:
+        return _is_assigned(order) or _is_assigned(read_order(client, order_ids[1]))
+
+    wait_until(client, order_ids[0], either_order_has_a_driver)
+
+    settled = [read_order(client, order_id) for order_id in order_ids]
+    taken = [order for order in settled if _is_assigned(order)]
+    waiting = [order for order in settled if _is_waiting_for_a_driver(order)]
+    assert len(taken) == 1, settled
+    assert len(waiting) == 1, settled
+    assert taken[0]["driver"]["id"] == driver_id
+    assert taken[0]["driver"]["status"] == "BUSY"
+
+    stays(client, waiting[0]["id"], _is_waiting_for_a_driver)
+
+    assert _advance(client, taken[0]["id"], "READY").status_code == 200
+    assert _advance(client, taken[0]["id"], "DELIVERED").status_code == 200
+
+    handed_over = wait_until(client, waiting[0]["id"], _is_assigned)
+    assert handed_over["driver"]["id"] == driver_id
+    assert handed_over["driver"]["status"] == "BUSY"
+
+
 def test_illegal_transition_is_refused(
     client: httpx.Client, unique_name: Callable[[str], str]
 ) -> None:
