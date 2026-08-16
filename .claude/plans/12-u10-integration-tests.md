@@ -26,7 +26,7 @@ up, and every assertion about it was still a human reading a log.
 
 | File | What it holds | Fixed by |
 |---|---|---|
-| `waiting.py` | `wait_until` and `stays`, and the three constants | 12.4 |
+| `waiting.py` | `wait_until` and `stays`, the three constants, and the order read they share (R-j) | 12.4 |
 | `conftest.py` | the HTTP client, unique naming, and 12.5's absorbing fixture | 12.5, 12.7 |
 | `test_scenarios.py` | the four scenarios as five test functions | 12.1, 12.2, 12.7 |
 | `README.md` | one section — the four scenario names, and how to run them | `CLAUDE.md` §5 |
@@ -200,6 +200,18 @@ than buried.**
   output would be uninformative — a `TimeoutError` naming only the elapsed seconds. Everywhere else
   pytest's own comparison of two values is better than a sentence restating it.
 
+- **R-j — `waiting.py` also exports `read_order`, which becomes the suite's only order read.**
+  Both helpers fetch the order on every poll, and the scenarios fetch it directly after a creation —
+  `POST` answers with the identifier alone (6.1) — so the same four lines are needed in two modules:
+  `GET /orders/{id}`, a `200`, and the decoded body. 12.7 rejects `tests/helpers/` as *"an
+  abstraction with one consumer"*, which rules out a third **module** and says nothing about a third
+  function inside the module that already polls with it. The alternative is the duplication
+  `CLAUDE.md` §6 rejects, in two files a reviewer reads side by side.
+  *Rejected — a `conftest.py` fixture:* a plain function cannot request one, so the helpers would be
+  unable to use the thing meant to serve them, and the duplication would survive anyway.
+  **Recorded as an amendment rather than folded in silently:** it widens what 12.7 says `waiting.py`
+  holds, and step 2's Definition of Done said "nothing else lives there" before this.
+
 ## 6. Steps
 
 ### Step 1 — Refuse an illegal transition, and refuse invalid input
@@ -252,8 +264,9 @@ unassigned and the fixture ends at 12.4's timeout, noise on an already-red run.
 
 **Definition of Done**
 
-1. `waiting.py` holds exactly `wait_until`, `stays`, and the three constants — 20 s, 3 s, 0.25 s —
-   each named and each carrying the one-line reason 12.4 gives it. Nothing else lives there.
+1. `waiting.py` holds `wait_until`, `stays`, the three constants — 20 s, 3 s, 0.25 s, each named and
+   each carrying the one-line reason 12.4 gives it — and `read_order` (R-j). Nothing else lives
+   there, and `test_scenarios.py` no longer carries a read of its own.
 2. The five commands of §4 exit zero, and `pytest tests/unit` collects eighteen.
 3. The suite runs the three ways §4 lists. **Run 2 is the one that matters at this step**: it is the
    first run whose precondition depends on the previous run having absorbed its driver.
