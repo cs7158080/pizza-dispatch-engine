@@ -3870,8 +3870,22 @@ and Part 4 of `03-roadmap.md`).
   *Rejected — making the gate the default launch command:* it makes the CLI deliverable
   undemonstrable straight after launch. This is the original form of the rejection and the one
   part of this item measurement left standing.
+  **That rejection is withdrawn on 2026-08-16, and it should not have survived the amendment
+  above.** Its whole reason was that the gate tore the stack down, leaving nothing to demonstrate —
+  true of `--abort-on-container-exit`, and **false of the form that replaced it**. `docker compose
+  up -d` followed by `docker compose wait tests` leaves every service running, which is 11.5's
+  requirement and is stated three lines higher as what the new form gains. A rejection whose stated
+  ground the same amendment removed is a leftover, not a decision.
+  *Consequence, and it is 13.1's to carry:* the README leads *Launch* with the two-command form,
+  because the assignment grades an environment that launches **and** executes its suite, and that
+  form is the one returning whether it did. Plain `docker compose up` follows immediately as the
+  foreground way to watch the same launch — it is not demoted to a footnote, and 11.3's PASS banner
+  in the stream is what that paragraph exists to show.
+  *Unchanged:* everything about what `up` does. This item still decides that a failing suite does
+  not tear the stack down; only which of the two commands the README prints first has moved.
   *Source:* R15, R19. *Answers:* Q8. *Amended:* 2026-08-16, on measurement rather than on a new
   argument; 11.1, 11.10, 11.11 and 12.9 carry the command's name and are amended with it.
+  *Amended again:* 2026-08-16, withdrawing a rejection the first amendment left standing.
 
 - **11.5 Behaviour after tests pass.** `[decided]`
   *Decision:* the stack **stays up**. Only the test service exits.

@@ -13,31 +13,28 @@ Requires Docker with the Compose v2 plugin, version 2.24 or later — check with
 `docker compose version`.
 
 ```
-docker compose up
-```
-
-That builds the image on the first run, then starts PostgreSQL, RabbitMQ, a one-shot service that
-creates the database schema, the API, and the dispatch worker. It needs no setup and no `.env`
-file: every value has a working default.
-
-**The first launch takes about four minutes**, nearly all of it building the image. Every launch
-after that reaches the test verdict in under a minute.
-
-Once the broker and the API are healthy, the integration suite runs against the system that was
-just started and prints an unmissable `PASS` or `FAIL` separator into the same stream. It runs once
-and exits, and **everything else stays up either way** — a failing suite leaves you a system to
-look at rather than a torn-down one.
-
-**As a CI-style gate**, where what matters is an exit code rather than a demonstration, launch
-detached and then wait on the test service:
-
-```
 docker compose up -d
 docker compose wait tests
 ```
 
-`docker compose wait` blocks until that service's container stops and returns its exit code. The
-stack is left running, so a gate that wants it gone ends with `docker compose down`.
+That builds the image on the first run, starts PostgreSQL, RabbitMQ, a one-shot service that
+creates the database schema, the API and the dispatch worker, and then — once the broker and the
+API are healthy — runs the integration suite against the system it has just started. It needs no
+setup and no `.env` file: every value has a working default.
+
+`docker compose wait` blocks until the suite finishes and **returns its exit code**, so this form
+is also the CI gate: `0` means the system came up and proved itself. The stack is left running
+either way, so a failing suite leaves you a system to look at rather than a torn-down one.
+
+**The first launch takes about four minutes**, nearly all of it building the image. Every launch
+after that reaches the verdict in under a minute.
+
+To watch it happen instead, run it in the foreground — the same launch, with the services' logs and
+an unmissable `PASS` or `FAIL` separator printed into the stream as it goes:
+
+```
+docker compose up
+```
 
 The database and the broker are deliberately kept out of this stream, so what you see is the API,
 the worker and the test run. Their logs are still collected — `docker compose logs postgres`.
@@ -128,13 +125,16 @@ sequenceDiagram
     api->>postgres: UPDATE orders + INSERT outbox
     api->>rabbitmq: publish ORDER_READY
     api-->>cli: 200
-    rabbitmq->>worker: deliver ORDER_READY
-    worker->>postgres: claim an AVAILABLE driver
-    postgres-->>worker: none
-    worker->>rabbitmq: reject, do not requeue
-    Note over rabbitmq: the message parks in a wait queue<br/>and is redelivered after a TTL
+    loop bounded retry: up to 8 attempts, 8 s apart
+        rabbitmq->>worker: deliver ORDER_READY
+        worker->>postgres: claim an AVAILABLE driver
+        postgres-->>worker: none available
+        worker->>rabbitmq: reject, do not requeue
+        Note over rabbitmq: parked in a wait queue and<br/>redelivered when the TTL expires
+    end
+    Note over worker: if the attempts run out the order is marked FAILED,<br/>so the loop is bounded rather than endless
 
-    Note over cli,worker: A driver registers, and the redelivery assigns them
+    Note over cli,worker: A driver registers, and the next redelivery assigns them
     cli->>api: POST /drivers
     api->>postgres: INSERT driver (AVAILABLE)
     api-->>cli: 201 and the new id
@@ -211,9 +211,14 @@ rejected, and what it costs.
 **RabbitMQ and PostgreSQL, chosen as a pair.** The brief asks for a message broker and a database
 without naming either. RabbitMQ gives per-message acknowledgement, dead-lettering and a delay
 primitive, which is exactly the retry mechanism this problem needs; Kafka's log model would have
-turned a redelivery-after-a-delay into partition-level replay. PostgreSQL follows from wanting one
-transaction to cover a status change and the record of the event it raises. The cost is two pieces
-of infrastructure to run rather than one — paid by Compose, and by nothing else.
+turned a redelivery-after-a-delay into partition-level replay. PostgreSQL follows from the shape of
+the data rather than from transactions, which a document store would also give: orders and drivers
+are a fixed, related schema, an order **references** a driver and a driver may hold only one active
+order, and those are foreign keys and unique constraints — rules the database enforces rather than
+rules the application hopes it applied. Modelling the same thing in a document store means either
+embedding a driver in every order and keeping the copies in step, or holding the reference anyway
+with nothing checking it. The cost is two pieces of infrastructure to run rather than one — paid by
+Compose, and by nothing else.
 
 **A synchronous runtime, chosen once for the whole system rather than a layer at a time.** Async is
 not a choice a layer makes: the transaction protocol, every repository, every use case and both
@@ -292,7 +297,8 @@ Each of these was considered and consciously excluded. [docs/future-work.md](doc
 holds the full register, ordered by what a reviewer is most likely to expect.
 
 The reasoning behind every choice above, in full and with the alternatives that were weighed, is in
-[.claude/plans/02-decisions.md](.claude/plans/02-decisions.md).
+[.claude/plans/02-decisions.md](.claude/plans/02-decisions.md); how that record was produced is in
+[docs/how-this-was-built.md](docs/how-this-was-built.md).
 
 ## Assumptions
 
@@ -316,8 +322,3 @@ Where the brief was silent or genuinely ambiguous, a reading was chosen and writ
   worker are two entrypoints into one package over one database.
 - The committed credentials are non-secret defaults for a disposable environment; a real deployment
   would supply its own.
-
----
-
-Built with an AI agent under a written working agreement, with the plan and the record of it
-committed alongside the code — see [docs/how-this-was-built.md](docs/how-this-was-built.md).
