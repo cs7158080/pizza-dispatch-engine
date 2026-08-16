@@ -70,6 +70,22 @@ after knowing its answer would be fiction. Their records are in `02-decisions.md
 - **R23.** Design decisions and implementation details must be defensible verbally in the
   interview.
 
+## Definition of Done
+
+The assignment's grading table, **verbatim**. Item 1.1's ceiling test asks which *named* row
+fails without a given thing, so the rows have to be enumerable; they are cited throughout
+`02-decisions.md` by the names in the left column and never by number.
+
+| Row | Definition of Done |
+|---|---|
+| **Docker Deployment** | The system environment launches seamlessly via Docker Compose, auto-executes the test suite, and exposes the required services cleanly |
+| **Interactive CLI** | An easy-to-use console client allows manual interaction with the running API services |
+| **Broker & Consumer** | Worker reliably consumes messages, executes post-processing ACKs, and handles driver retries without crashing |
+| **System Design** | Clear sequence diagram mapping API endpoints, message broker events, worker logic, and DB updates |
+| **Test Automation** | 3–4 well-documented automated tests executed as part of the environment launch process |
+| **Code Quality** | Clean architecture separating routes, domain logic, workers, and console tools, configured using an `.env` file |
+| **Documentation** | A **concise** `README.md` covering launch execution, CLI client usage, test instructions, and design trade-offs |
+
 *R22 and R23 were appended on 2026-08-07. Both are stated in the assignment and were omitted
 from the original restatement: R13 dropped the second half of "use PostgreSQL or MongoDB **to
 store orders, drivers, and assignment states**", which left item 4.2's successor 4.4 as the
@@ -77,6 +93,18 @@ only decision in the record citing the brief directly for want of a requirement 
 "be ready to explain your design decisions during the interview" is the requirement that item
 1.3 exists to serve. Item 1.1's ceiling test is only as good as this list, which is how both
 gaps surfaced.*
+
+*The Definition of Done table was appended on 2026-08-14, at U13's gate, and R17 and R19 were
+narrowed on the same reading. Its rows had been cited by name since 1.1 was written — the
+ceiling test is stated in terms of them — but the table itself was never restated here, so the
+list every candidate was checked against lived outside the repository. Two qualifying words had
+been dropped with it, and both are load-bearing. R17's diagram must be **embedded in the
+documentation** — the diagram section says "in your documentation" and the deliverables list
+says "embedded in documentation". **Neither says README**, so the word fixes that the diagram is
+*carried* rather than *linked to*, and leaves which document it sits in to 13.2. R19's README
+must be **concise**,
+which is a ceiling on 13.1 and not a matter of taste. Per this file's append-only rule neither
+requirement is rewritten; this note carries the narrowing.*
 
 
 ---

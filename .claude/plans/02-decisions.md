@@ -29,9 +29,9 @@ status markers, precisely so that this table cannot be contradicted.
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.1–11.11 | — |
 | 12 — Testing | 12.1–12.10 | — |
-| 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
+| 13 — Documentation | 13.1–13.7 | — |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **107** | **4** |
+| **Total** | **112** | **0** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -4556,7 +4556,8 @@ and Part 4 of `03-roadmap.md`).
   all:* 5.7, unchanged. **Not rested on 1.1's ceiling test**, which would delete the set
   whole — same log row.
   *Source:* `CLAUDE.md` §5, R18. *Constrained by:* 5.7, 12.2, 12.3. *Answers:* Q16 in full,
-  completing A17. *Realised in:* U2, U3, U5, U6.
+  completing A17. *Feeds:* 13.4 — the no-doubles half of entry 9, as a cost accepted rather than
+  deferred. *Realised in:* U2, U3, U5, U6.
 
 - **12.7 Directory layout and separate run commands.** `[decided]`
   *Decision:* **the two directories that already exist, two commands, and no pytest
@@ -4628,7 +4629,8 @@ and Part 4 of `03-roadmap.md`).
   home; and 7.4's `x-death` count, which no test observes. The suite sees that the message came
   back, never how many times.
   *Source:* R9, `CLAUDE.md` §5. *Constrained by:* 1.2, 8.2, 8.3, 10.4, 12.1, 12.2, 12.3.
-  *Consumes:* 12.4, 12.5. *Realised in:* U10.
+  *Consumes:* 12.4, 12.5. *Feeds:* 13.4 — the retry path settled with no broker interface opened,
+  which is entry 9's third leg. *Realised in:* U10.
 
 - **12.9 Where results are surfaced.** `[decided]`
   *Decision:* **console only, no report file** — and the `command` 11.9 left blank:
@@ -4722,6 +4724,230 @@ and Part 4 of `03-roadmap.md`).
 
 ## Topic 13 — Documentation and deliverables
 
+- **13.1 README structure.** `[decided]`
+  *Decision:* **seven sections, and each one answers a named DoD row.** The assignment's
+  *Documentation* row asks for a **concise** README covering four topics; three more sections
+  come from other rows and from `CLAUDE.md` §7.
+
+  | Section | Contents | Required by |
+  |---|---|---|
+  | *(head)* | three lines — what the system is, and the stack | §7 — "written for someone who has never seen the project" |
+  | **Launch** | Compose v2.24 (11.10), `docker compose up` and what it prints (11.3), the API URL and `/docs` (11.8), `--build` (11.9), the CI-style gate (11.4), teardown with `docker compose down` (11.7), two lines on `.env.example` (10.3) | DoD *Docker Deployment*; *Documentation* — "launch execution" |
+  | **Using the CLI** | `docker compose run --rm cli` (9.3), the Git Bash / `winpty` note (9.6), then 1.2's thirteen steps as the run that shows the system — **including both outcomes of step 6** | DoD *Interactive CLI*; *Documentation* — "CLI client usage" |
+  | **How it works** | the sequence diagram. **Its format and placement are 13.2's, its count 13.3's** | DoD *System Design*; R17 |
+  | **Tests** | what runs at launch, the four scenario names one line each (12.2), re-running (12.9), the lint and type commands (12.10), and 11.6's determinism boundary — written with `down`, not `down -v` | DoD *Test Automation*; *Documentation* — "test instructions"; §5 |
+  | **Trade-offs** | 13.4's content **in 13.4's order** — foundational decisions first — closing with what was deliberately not built (`docs/future-work.md`, 13.7) | *Documentation* — "design trade-offs"; §7 |
+  | **Assumptions** | the fifteen lines 13.6 marks **†**, one line each | §7; R23 |
+  | *(closing line)* | one sentence pointing at `docs/how-this-was-built.md` | 14.5, narrowed — below |
+
+  *The rule that produced the list is 1.1's own:* delete a section — which **named** DoD row
+  fails? Five answer a row directly; two answer `CLAUDE.md` §7. Nothing else survived.
+
+  *What the rule deleted, from an eleven-section draft:* **Configuration** as a heading — `.env`
+  belongs to the *Code Quality* row, which grades the code and not the README, so two lines
+  inside *Launch* carry it. **Out of scope** as a heading — "what was not built and why" is a
+  trade-off, and splitting one family across two headings is what "concise" forbids. **Local
+  development** — no row fails without it; the four pre-commit checks move to
+  `docs/how-this-was-built.md` and the `uv pip compile` block is written for a contributor who
+  does not exist. **The demo path as a section of its own** — eleven of its thirteen steps are
+  CLI actions, so 1.2's table **is** "CLI client usage" rather than something beside it. **A
+  table of endpoints** — 11.8 publishes the port so that FastAPI's generated document can be
+  read; a hand-written table is the same contract in a second place with nothing keeping the two
+  in step.
+
+  *Why the CLI section documents no menu:* 9.1 prints the five actions on every loop, so a
+  second copy could only go stale. What a reader cannot guess is the launch command and the Git
+  Bash failure, and that is exactly what is written.
+
+  *One closed record is narrowed here.* 14.5 requires *"a 'How this repository was built'
+  section in the README"*. That section is a reader's guide to `CLAUDE.md` and `.claude/plans/`,
+  and no DoD row names it — so under *Documentation*'s "concise" it becomes
+  **`docs/how-this-was-built.md`**, linked once from the README's last line. **14.5's decision is
+  untouched:** the planning record still ships and is still named from the README, and only its
+  container changes — which is the form 14.5's own condition asked for, *"linked once as optional
+  depth"*. 14.2's unit-branch sentence travels with it.
+
+  *Four groups of inputs above are closed on gate branches that have not merged* — 11.1,
+  11.8–11.11 (`plan/u9-gate`), 12.4, 12.5, 12.8 (`plan/u10-gate`), 12.9, 12.10
+  (`plan/u11-gate`) and topic 9 (`plan/u12-gate`). 14.3 provides for exactly this: a gate is
+  written when a session is free and merged when its contract is first needed. **U13 is the unit
+  that needs all four.**
+
+  *Rejected:* **the eleven-section draft** — above, written before the DoD table was in the
+  repository. **The README carrying the trade-offs in full rather than in summary** — 1.4 fixes
+  `02-decisions.md` as the only original.
+  *Source:* R19, DoD *Documentation*, `CLAUDE.md` §5, §7. *Constrained by:* 1.1, 1.2, 1.4, 9.1,
+  9.3, 9.6, 10.3, 11.4, 11.6–11.11, 12.2, 12.7, 12.9, 12.10, 13.6, 14.2. *Constrains:* 13.2,
+  13.3, 13.4. *Narrows:* 14.5's README requirement. *Realised in:* U13.
+
+- **13.2 Sequence diagram format and location.** `[decided]`
+  *Decision:* **Mermaid, in a fenced ```mermaid block inside the README's *How it works*
+  section** (13.1). No separate file, no committed image.
+  *Why Mermaid and not an image:* `CLAUDE.md` §4 forbids generated artifacts, and nothing would
+  regenerate this one — a change to 5.1, 7.5 or 8.2 would leave the picture wrong and silent,
+  with no diff to catch it in review. *Not ASCII:* it renders anywhere, which is its whole
+  advantage, and the DoD asks for a **clear** diagram; seven participants and an asynchronous
+  retry loop drawn by hand have to be realigned on every edit, where a Mermaid edit is one line.
+
+  *Why the README, and not on the word "embedded".* The assignment says *"in your documentation"*
+  and *"embedded in documentation"* — **neither says README**, and a separate documentation file
+  would satisfy both. What the word does fix is that the diagram is carried rather than linked
+  to. The location rests on one fact instead: **14.1 delivers a public GitHub repository, which
+  renders the fence itself**, so on the surface a reviewer actually reads, the block is a picture
+  and not thirty-five lines — which is what removes R19's "concise" as an objection. That it is
+  also a separately graded deliverable, best found in the file opened first, is a second and
+  weaker reason: a reviewer holding a *System Design* row would follow a link.
+  *Accepted cost:* a reader outside GitHub sees diagram source. It is an ordered list of messages
+  between components, so it stays legible unrendered.
+
+  *Rejected:* **a separate document** — the cost it saves is only paid by a reader who is not on
+  the delivered surface. **Mermaid inline plus a rendered image beside it** — one diagram in two
+  places, which is 13.6's drift with a picture attached.
+  *Ruff does not touch it:* 2.8 excludes Markdown from the formatter's file scope.
+  *Corrected while deciding:* the inventory note added at this gate claimed "embedded" removed the
+  choice between the README and a file beside it. It does not; the note is narrowed and the
+  location is decided here on its own grounds.
+  *Source:* R17, DoD *System Design*. *Constrained by:* 1.2, 13.1, 14.1. *Constrains:* 13.3.
+  *Realised in:* U13.
+
+- **13.3 Diagram scope and count.** `[decided]`
+  *Decision:* **one diagram, five participants named after their Compose services** — `cli`,
+  `api`, `postgres`, `rabbitmq`, `worker` — covering 1.2's steps 3 to 12, which that item already
+  fixed as every path R17 names.
+  *Why one and not two:* the missing-driver path is not an alternative branch here. 1.2's steps 6
+  to 9 put it **on the main line** — `BAKING` with an empty pool, the reject, the registration,
+  the redelivery — so a second diagram would split a sequence that does not fork, and would repeat
+  the participants and the three steps before it in both.
+  *Why the Compose names:* a reviewer who reads `worker` in the diagram and types
+  `docker compose logs worker` gets the same word. 11.1 records that every one of those names is
+  already load-bearing somewhere else.
+  *Two things the diagram shows and one it does not.* The outbox insert appears as a single
+  message — `UPDATE orders + INSERT outbox`, one transaction — because 7.5's atomicity is the
+  design decision 13.4 explains in words, and one line makes it visible. 8.2's wait queue appears
+  as a note over `rabbitmq` rather than a sixth participant: a box costs a column down the whole
+  diagram for two arrows. Neither the `schema` one-shot nor the `tests` service appears — 11.1
+  lists them, and R17 asks for the request path.
+  *Source:* R17, DoD *System Design*. *Constrained by:* 1.2, 11.1, 13.2. *Realised in:* U13.
+
+- **13.4 Trade-off log content.** `[decided]`
+  *Decision:* **nine entries and one selection rule**, in the README's *Trade-offs* section
+  (13.1). Each is three to six lines: what was chosen, what was rejected, what it costs.
+
+  *The rule:* **an entry is written when a reviewer would otherwise read the delivered system as a
+  mistake.** That admits what looks like an omission (no migrations, no second test stack), what
+  departs from the orthodox arrangement (publishing after the commit, tests that touch no
+  database), and what carries a visible cost (`200` on a status update whose event was lost). It
+  excludes choices with no genuine alternative — 1.3 filtered those once already, and a section
+  that defends `ruff` buries the nine that matter.
+
+  *The rule that orders them, and it is a second axis rather than a second filter:* **a decision the
+  rest of the system stands on goes first.** A reviewer questions a foundation early or not at all,
+  so answering before the question forms is what keeps it from being asked; an entry answering a
+  visible gap invites the question by naming it, and lands better once the ground under it is
+  settled. **Membership is the rule above; order is this one, and nothing is dropped for ranking
+  low.**
+  *What a low rank means instead — this is the working half of it:* the entry leads with the wrong
+  half of its own reasoning. Four of the nine rested their case on what was saved rather than on
+  what is structurally absent, and every one of the four had the structural reason already written
+  in the record it summarises. Ranking low is an instruction to rewrite, never to delete.
+  *Rejected — ordering by the membership rule alone:* it already selects these entries, so reusing
+  it would put the same gap-shaped items at the top of both this section and 13.7, which reads as
+  one list printed twice.
+
+  | # | Entry | Assembled from |
+  |---|---|---|
+  | 1 | RabbitMQ and PostgreSQL, chosen as a pair | 2.1, 2.2, A1 |
+  | 2 | **A synchronous runtime, chosen once for the whole system** — not a layer at a time; what it costs while it stands, and the condition that turns it over | 2.4, 7.7, FW12 |
+  | 3 | Retry through a dead-letter exchange and a TTL, not an immediate requeue | 8.2, 8.3 |
+  | 4 | **The publish happens after the commit** — the accepted lost event, the `outbox` row that records it, and the experiment that shows it | 7.5, 7.6, 9.4, 11.11, FW2 |
+  | 5 | **Migrations act on a schema holding data that must survive the change, and this one holds none** — why `create_all`, and what reverses it | 4.6, 11.7, FW16 |
+  | 6 | **A CI server is shared infrastructure, not a service this repository defines** — what runs instead, and what the gap costs | 14.3, FW19 |
+  | 7 | **Every launch starts from empty**, which is the property an ephemeral test environment exists to provide — and why there is no second stack | 11.6, 11.7, FW13 |
+  | 8 | One worker, and nothing in the code assumes it | 8.5, 8.9, FW7 |
+  | 9 | **No test reaches around the real thing** — not past the contract to the schema, not past infrastructure to a double, not past HTTP to the broker | 12.3, 12.6, 12.8 |
+
+  *Entry 2 is the decision with the widest blast radius, and the entry has to say why it was taken
+  once rather than incrementally.* Moving to `async` is not a layer's choice: 3.5's `UnitOfWork`,
+  every repository, every use case and both composition roots go together, the drivers change with
+  them, and the unit set acquires a plugin that costs it the "free" standing `CLAUDE.md` §5 admits
+  it under. `domain/` is the one layer that would not move. **What makes it a decision rather than a
+  default is that the cost of the side taken is named too:** 7.7's publisher lock exists because the
+  runtime is synchronous and `async` would delete it, and a `PATCH` against an unreachable broker
+  holds a pool thread for up to twice the configured timeout. *Not written as a cost of `async`
+  alone:* synchronous is equally a colour, every function in the system carries it today, and an
+  argument that applies to both sides decides nothing.
+
+  *Entry 4 is the only one carrying a command, and that is deliberate:* `docker compose stop
+  rabbitmq`, then a status update — `200`, and the order stays `PENDING`. 11.11 named the command,
+  9.4 sized the CLI's 15 s timeout so that the experiment cannot contradict the page describing
+  it, and 11.8 sent the path here rather than publish the database port for it. **An invitation to
+  disprove us reads stronger than a paragraph asserting we thought about it.**
+
+  *Entry 7 leads with the clean start, not with the absence of isolation.* Nothing is persisted,
+  so no run inherits another's residue — which is the property an ephemeral test environment
+  exists to provide, and this environment has it. Leading with what is missing would raise the
+  objection before the answer; and the entry names FW13 as this project's own future work, which
+  is what shows the norm was known rather than overlooked.
+
+  **Entry 6 leads with where a CI server belongs, not with the fact that none runs.** It is
+  infrastructure shared across projects rather than a service in the file R14 defines — 11.1 closed
+  that list at seven and 12.10 rejected an eighth one-shot on the same ground — so the shape it
+  would take is a server that already exists, pointed at 14.1's public repository, with the pipeline
+  committed beside the code. **Every check such a pipeline would run already runs:** the linter, the
+  type checker and the unit tests before each commit (14.7), and the integration suite inside
+  `docker compose up`, in front of whoever launched it (11.3, 11.4). What is missing is the trigger,
+  not a check. A Jenkins alongside the stack was weighed and priced before it was declined — a plugin
+  set able to drive those commands builds in about nine minutes on a clean cache, paid by whoever
+  launches this first — and the server-free tool that would have validated a pipeline without one has
+  had no release since 2023. What the gap costs is a check skipped locally with nothing to catch it,
+  which one author carries by discipline and a team cannot.
+
+  *Entry 9 is three closed decisions stated as one principle, because they are one.* 12.3 keeps the
+  integration suite on the contract instead of reading the schema behind it; 12.6 keeps the unit set
+  free of test doubles; 12.8 settles the retry path with no broker interface opened, no clock moved
+  and no configuration tuned. Each was decided on its own ground and all three land in the same
+  place: **nothing in the suite is allowed a shortcut around the thing it claims to verify.** One
+  entry carries them, and the section stays at nine.
+  *The cost it names, because an entry that states only a principle is a claim:* the port failure
+  paths — `PublishFailed`, `TransactionFailed`, `OutboxWriteFailed` — are reached by breaking
+  infrastructure by hand (11.11) rather than on demand. **12.6 accepted that cost rather than
+  deferring it**, which is what puts it in this section and keeps it out of 13.7's register.
+
+  *Form, and it is 1.4's rule made concrete.* No entry carries an item number: "see 7.5" is noise
+  to a reader who has not opened the planning record, and 14.5 requires the README to stand alone.
+  The section ends with **one** pointer to `.claude/plans/02-decisions.md`, which is the "linked
+  once as optional depth" that item asks for. Nothing here is written first — each entry summarises
+  a record that already exists, per 1.4's *"a derived view, never a second original"*.
+
+  *What closes the section:* six lines naming what a reviewer would look for and not find —
+  authentication, driver endpoints beyond registration, order filtering and paging, structured
+  order items, metrics and tracing, an isolated test environment — then one line pointing at
+  `docs/future-work.md` for the full register (13.7). **No `FW` code appears in the README**; the
+  codes are internal and carry no meaning to a reader.
+  *The pointer moved off Part 5 when 13.7 gave the register a reader's form.* It now sends a
+  reviewer **out** of `.claude/plans/` rather than into it, which is what 14.5 asks of a README that
+  has to stand alone; the planning record keeps its own single link, at the section's end.
+
+  *A different candidate for this slot was rejected in review, and its content placed rather than
+  dropped.* What the launch does not gate — no report file (12.9), no lint or type gate (12.10) —
+  has no heavy alternative under the rule above; it is a note, not a trade-off. **That is what
+  separates it from entry 6,** which names the same missing automatic gate and does have one: a
+  Jenkins service was priced before it was declined. Both records read *Feeds:
+  13.4*, so: `--junit-xml=` becomes one sentence in *Tests*, beside the decision it reverses, and
+  12.10's two `docker compose run --rm tests` commands go to `docs/how-this-was-built.md` beside
+  the pre-commit checks — which is where 12.10's own argument lands, since that file is what claims
+  those checks ran. *13.1's Tests row is narrowed with it:* the lint and type commands leave it,
+  the log and single-scenario commands stay.
+
+  *Rejected:* **an entry per decision that has a genuine alternative** — 1.3's filter admits far
+  more than nine, and the section would restate the record instead of summarising it, which is
+  what 1.4 forbids. **The squash-merge and branch workflow** — process rather than design, and
+  14.5's file already holds it.
+  *Source:* R19, DoD *Documentation*, `CLAUDE.md` §7. *Constrained by:* 1.2, 1.4, 2.1, 2.2, 2.4,
+  4.6, 7.5, 7.6, 7.7, 8.2, 8.3, 8.5, 8.9, 9.4, 11.6–11.8, 11.11, 12.3, 12.6, 12.8, 12.9, 12.10,
+  13.1, 13.7, 14.3, 14.5.
+  *Narrows:* 13.1's Tests row, and 12.9's and 12.10's *Feeds* lines. *Realised in:* U13.
+
 - **13.5 `docs/ai-log.md`.** `[decided]`
   *Decision:* **nothing to decide — the file already exists and defines itself.** It specifies
   a five-column table (`Date`, `Area`, `Agent proposed`, `Decision`, `Why`), a closed set of
@@ -4749,6 +4975,69 @@ and Part 4 of `03-roadmap.md`).
   following the pointer would have to leave the file that holds the answer.
   **Full paragraphs, as before** — the form that produced the drift.
   *Source:* `CLAUDE.md` §7. *Realised by:* the Assumptions section of this file.
+
+- **13.7 `docs/future-work.md`.** `[decided]`
+  *Decision:* **a reader's register of what was not built, ordered by what a reviewer would
+  expect to find.** Nineteen entries in two tiers, in `docs/` beside `ai-log.md` and
+  `how-this-was-built.md`, and linked once from the README's *Trade-offs* section (13.4).
+
+  *The rule that selects and orders it:* **would a competent engineer hold a standing
+  expectation that a production service has this, independent of this brief?** It asks about
+  professional norms rather than about this project, so a rank can be settled without arguing
+  taste. 13.4's rule — whether an absence reads as a mistake — breaks ties.
+  *Why not 13.4's rule alone:* it already selects the trade-off entries, and one rule governing
+  both documents would make the top of this file indistinguishable from the section a reviewer
+  has just finished reading.
+
+  | Tier | Entries | Form |
+  |---|---|---|
+  | 1 | FW9, FW19, FW16, FW6, FW13, FW2, FW12, FW4, FW17 | two to three lines — the thing, why it is not here, what taking it would need |
+  | 2 | FW5, FW11, FW3, FW7, FW14, FW1, FW15, FW8, FW10, FW18 | one line each |
+
+  *The tiers differ in depth, not in presence.* Every entry appears, and the second tier is a
+  scan rather than a read. *Rejected:* **nineteen entries at one weight** — the first tier earns
+  a reviewer's attention and the tail only has to prove the register is complete, which is 14.5's
+  warning about volume applied before it bites. **A cut at N, with the remainder unmentioned** —
+  §7 requires deliberate exclusions to be stated, and a tail of one-line entries states them at
+  almost no cost.
+
+  *FW17 is placed by hand, and the reason is named because a rule with a silent exception reads
+  as a rule broken.* Nobody holds a standing expectation about the bound on a publisher confirm,
+  so the test puts it in the second tier. What it carries is that the last phase of a publish is
+  bounded at about 65 s by `pika`'s heartbeat rather than by the five seconds 10.4 configures —
+  read out of `pika/heartbeat.py` rather than estimated — and why no code of ours can repair it
+  in place. **It is the entry that shows a timeout was traced instead of trusted**, which is
+  worth more than its rank. It joins the first tier last, displacing nothing that earned a place
+  there on the rule.
+
+  *Its relation to Part 5, and this is what keeps it a product rather than a second plan:*
+  Part 5 of `03-roadmap.md` stays the **complete original** — nineteen entries, unreordered, and
+  1.1 still sends every unbuilt candidate there before anything appears here. This file is a
+  derived view, per 1.4's *"a derived view, never a second original"*. Order is a property of
+  the view; the codes and their numbering stay with the source.
+
+  *Form, and it follows from who reads it:* **no `FW` code, and no sentence carried across.**
+  13.4 bars the codes from the README on the ground that they are internal and mean nothing to a
+  reader, which is as true one file away; and an entry quoted from Part 5 would arrive full of
+  item numbers written for the developer. Each entry is rewritten in its own words, and the join
+  back to its source is the title. **This record names the codes freely — the bar is on the file
+  a reviewer is handed, not on the record that defines it.**
+  *The cost that buys, stated rather than glossed:* a sentence of reasoning per entry can drift
+  from the entry it summarises, where 13.6 avoids drift by carrying no reasoning at all. The
+  mitigation here is the weaker one: each sentence states a structural fact — that no data
+  survives a launch, that the concurrency does not exist — which changes only when the design
+  does.
+
+  *Rejected — five items proposed for this file that no Part 5 entry holds:* JSON log output, a
+  drained shutdown on `SIGTERM`, a version on the message contract, an idempotency key on
+  `POST /orders`, and a history of status transitions. Each passes the rule above, and each would
+  have needed a Part 5 entry of its own first, per 1.1. None was taken: the register is a view of
+  what was already decided, and an entry decided in order to be listed inverts that.
+  *Rejected — a sixth, a unit set widened with test doubles:* its cost was accepted rather than
+  deferred (12.6, *"closed to accumulation, not to growth"*), and a register of things still
+  wanted is the wrong home for a closed decision. 13.4's entry 8 carries it instead.
+  *Source:* `CLAUDE.md` §7; DoD *Documentation*. *Constrained by:* 1.1, 1.4, 12.6, 13.4, 14.5.
+  *Realised in:* U13.
 
 
 ## Topic 14 — Git and process
@@ -4794,9 +5083,29 @@ and Part 4 of `03-roadmap.md`).
   item's objection — and that agreement ships (14.5), so departing from it is visible.
   *No self-review, stated rather than dressed up:* the value is the record, not a review pause a
   person performs against themselves.
-  *No CI:* R15 already has `docker compose up` run the suite and 11.3 print PASS/FAIL, which
-  outweighs a lint badge; 12.10 may put `ruff` and `mypy` in the same run. **Accepted cost:** a
-  locally skipped check has nothing to catch it.
+  *No CI, re-examined on 2026-08-16 and unchanged — the alternatives were priced this time
+  rather than waved off.* R15 already has `docker compose up` run the suite with 11.3 printing
+  PASS/FAIL, and 12.10 closed the lint and type checks as local-only, so what a CI server adds is
+  not a command but a **trigger**: the same checks, run without being asked. Three routes to one
+  were weighed. **Jenkins as a compose service** — a plugin set sufficient to run those commands
+  builds in **9m01s** from a clean cache and adds 74 MB to a 483 MB base image, paid by the
+  reviewer on a first launch, for a service R14 does not name and 11.1 closed its list against.
+  **`jenkinsfile-runner`**, which would have validated a pipeline with no server at all — its
+  published image is dated 2022-07-29 and its last release, 1.0-beta-32 (2023-11-12), is still a
+  beta, so 2.10's bar is not met. **A committed `Jenkinsfile` with nothing in the delivery to run
+  it** — genuinely cheap, and it fails 1.1's ceiling test with no DoD row behind it. Nothing is
+  built, and no exception to 1.1 is needed.
+
+  *One of this item's own arguments is withdrawn.* It counted a CI server's network dependency
+  against it. The delivery already pulls `python:3.12-slim`, `postgres:16`, `rabbitmq:3.13` and
+  every pinned wheel over the network, so a network dependency does not separate the two — what
+  separates them is that those are required and a CI server is not, so the same failure surface
+  buys nothing a DoD row names. **The pinning half survives at reduced size:** the images are
+  pinned by 11.1 and the wheels by 2.9, while plugins resolve to the latest compatible version
+  unless all 58 in the transitive set are pinned by hand.
+  **Accepted cost, unchanged:** a locally skipped check has nothing to catch it — which one author
+  carries by discipline and a team cannot, and that is the condition FW19 records as reversing it.
+
   *Planning commits.* Phase 1 and the decisions taken before the split landed through one pull
   request from `plan/project-planning`. **Phase 2 and Phase 3 then part company, because they run
   on different clocks.** A unit's remaining Phase 2 items are settled on a short `plan/u<N>-gate`
@@ -4831,9 +5140,10 @@ and Part 4 of `03-roadmap.md`).
   planning, before its implementation** — the closest reading of §2 Phase 4, and it buys no real
   evidence: with no self-review stage a merged pull request records that merge was pressed, not
   that a review happened. The ordering stays visible anyway, since the planning commit precedes
-  the step commits on the branch. **CI as a required gate** — an external dependency for checks
-  that already run before every commit.
+  the step commits on the branch. **CI as a required gate** — what a gate adds is a trigger rather
+  than a check, and the routes to one are priced above.
   *Source:* `CLAUDE.md` §4. *Constrained by:* 14.2, 14.4. *Answers:* 2.8's CI deferral.
+  *Feeds:* 13.4. *Deferred to:* FW19.
 
 - **14.4 Unit-to-commit map.** `[decided]`
   *Decision:* **one commit per Phase 3 step; one branch and one pull request per unit.** The map
