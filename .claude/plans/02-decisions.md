@@ -28,10 +28,10 @@ status markers, precisely so that this table cannot be contradicted.
 | 9 — CLI | 9.1–9.6 | — |
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.1–11.11 | — |
-| 12 — Testing | 12.1, 12.2, 12.3, 12.5, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.8 |
+| 12 — Testing | 12.1–12.7, 12.9, 12.10 | 12.8 |
 | 13 — Documentation | 13.5, 13.6 | 13.1–13.4 |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **105** | **6** |
+| **Total** | **106** | **5** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -4380,6 +4380,85 @@ and Part 4 of `03-roadmap.md`).
   *Hands to 2.6:* one HTTP client, and nothing else; topic 12 adds nothing to 2.10's list.
   *Source:* `CLAUDE.md` §5. *Constrained by:* 6.5, 6.6, 11.6, 11.7. *Constrains:* 2.6, 12.1,
   12.2, 12.4, 12.5. *Feeds:* 13.4.
+
+- **12.4 Waiting for the asynchronous assignment.** `[decided]`
+  *Decision:* **two helpers over `GET /orders/{id}` (12.3), and three constants.**
+  `wait_until(order_id, predicate)` polls until the predicate holds and returns the order payload,
+  so the test asserts on it without a second read; `stays(order_id, predicate)` polls across a
+  bounded window and fails on the **first** violation. **No test contains a bare sleep**; every wait
+  goes through one of the two. Their names are fixed here because the record uses them; their
+  placement is 12.7's, which puts both in `tests/integration/waiting.py`.
+
+  | Constant | Value | Where it comes from |
+  |---|---|---|
+  | Timeout, both helpers | **20 s** | 2.5 × 8.2's retry cycle |
+  | Observation window | **3 s** | one delivery, not one cycle — below |
+  | Poll interval | **0.25 s** | the cadence at which the condition is tested |
+
+  *Why the timeout is measured in retry cycles:* scenarios 2 and 3 wait for an assignment that
+  follows a **rejection**, so the message is sitting in 8.2's wait queue. Worst case it was
+  redelivered a moment before the driver became available, and the next delivery is a full
+  `PIZZA_DISPATCH_RETRY_DELAY_SECONDS` away — 8 s (10.4). A timeout under that colours the suite red
+  on a healthy system. One value serves every wait, including the fast ones: on success a generous
+  timeout costs nothing, since it is only ever measured on failure.
+
+  *Why the window is measured in deliveries, which is what makes it 3 s and not 12 s.* 7.5 publishes
+  inside the request after the commit, so the message is queued before the `PATCH` returns, and
+  8.5's single consumer takes it immediately — **the first delivery is not delayed; only
+  redeliveries are.** Each negative assertion 12.2 requires excludes a fault that would appear on
+  that first delivery:
+
+  | Window | Fault excluded | When it would appear |
+  |---|---|---|
+  | Scenario 1, after `READY` | 5.5's guard broken — a second driver claimed, or the assignment overwritten | first delivery of the second event |
+  | Scenario 2, at `BAKING` | an assignment invented with no driver available | first delivery |
+  | Scenario 3, the second order | the claim ignoring `status='AVAILABLE'` | first delivery |
+
+  A window covering a full retry cycle would observe the same code fail the same way again; it
+  exercises no further path. **The limit is stated rather than glossed:** a 3 s window can end
+  before a cold worker's first delivery, and the assertion then passes having tested nothing. A
+  longer window does not repair that — if the worker is not consuming, no window sees a delivery —
+  it buys more sampling chances, not a guarantee. In scenarios 1 and 3 an assignment moments earlier
+  in the same test has already proved the worker live, so only scenario 2's window is unbacked, and
+  12.2 already places that scenario's proof on the positive assertion after it rather than on the
+  window. Against that, 12.1 dropped a whole scenario for costing about a minute per launch; a 12 s
+  window costs nearly the same and adds no scenario.
+  **3 s is chosen inside a range, not computed.** It sits between the two timescales the system has
+  — sub-second local processing and the 8 s retry delay — far enough from both to be confused with
+  neither.
+
+  *Why `stays` is not the fixed sleep `CLAUDE.md` §5 forbids.* §5 forbids assuming the system is
+  ready after N seconds. Here the elapsed time is the **subject** of the assertion, not an
+  assumption about readiness: the helper tests a condition twelve times and fails at the earliest
+  moment a violation is visible, which a `sleep` followed by one read does not — it would also miss
+  a transient assignment later overwritten. 11.2 already made this argument for a healthcheck's
+  `interval` and `start_period`, *"the cadence at which a condition is tested"*. **This reads §5
+  rather than amending it**, which is the conclusion 12.6 reached for the unit set on its own
+  question.
+
+  *The three values are constants in the suite, not configuration.* 11.8's rule decides it — a value
+  becomes configuration when something outside our control can force it to differ, and nothing
+  forces these. 10.1 gives the suite `ClientSettings`, which holds `api_base_url` alone; adding the
+  retry delay to it would make the CLI supply a value it never reads, the exact cost 10.1 split the
+  two classes to avoid. *Reopen condition:* the timeout is derived from 10.4's 8 s, so a change to
+  that value — FW13 is the only one 10.4 admits — reopens this item. A reviewer who overrides
+  `PIZZA_DISPATCH_RETRY_DELAY_SECONDS` upward gets a red suite on a healthy system, which is outside
+  the envelope 11.6 supports, alongside a stack driven by hand.
+
+  *A timeout failure carries the last observed order payload*, not only the elapsed time. Without it
+  a red suite cannot distinguish an order stuck at `PENDING` from one that reached `FAILED` or was
+  assigned to an unexpected driver — three faults with three different causes.
+  *The suite measures real elapsed time* with `time.monotonic()`. 4.8's clock port exists so the
+  **core** does not depend on wall time; the suite is not the core, and elapsed time is precisely
+  what it is asserting about.
+  *What this costs the launch:* about 30 s on a healthy system — roughly 4 s for scenario 1
+  including 12.5's absorption, 11 s for scenario 2, 12 s for scenario 3, and nothing for scenario 4.
+
+  *Rejected:* **one helper with a flag** — the two fail for opposite reasons and a shared signature
+  hides it; **a fixed sleep before a single read** — above; **deriving the timeout from the
+  environment** — above; **a window covering a full retry cycle** — above.
+  *Source:* `CLAUDE.md` §5, R18. *Constrained by:* 7.5, 8.2, 8.5, 10.1, 10.4, 11.6, 12.2, 12.3.
+  *Constrains:* 12.5, 12.8. *Defers to:* 12.7 for placement. *Realised in:* U10.
 
 - **12.5 Test data strategy and isolation.** `[decided]`
   *Decision:* **unique data per test on a clean start, and one invariant that makes execution order
