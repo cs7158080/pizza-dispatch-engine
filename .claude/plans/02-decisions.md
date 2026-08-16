@@ -4549,7 +4549,8 @@ and Part 4 of `03-roadmap.md`).
   all:* 5.7, unchanged. **Not rested on 1.1's ceiling test**, which would delete the set
   whole — same log row.
   *Source:* `CLAUDE.md` §5, R18. *Constrained by:* 5.7, 12.2, 12.3. *Answers:* Q16 in full,
-  completing A17. *Realised in:* U2, U3, U5, U6.
+  completing A17. *Feeds:* 13.4 — the no-doubles half of entry 9, as a cost accepted rather than
+  deferred. *Realised in:* U2, U3, U5, U6.
 
 - **12.7 Directory layout and separate run commands.** `[decided]`
   *Decision:* **the two directories that already exist, two commands, and no pytest
@@ -4621,7 +4622,8 @@ and Part 4 of `03-roadmap.md`).
   home; and 7.4's `x-death` count, which no test observes. The suite sees that the message came
   back, never how many times.
   *Source:* R9, `CLAUDE.md` §5. *Constrained by:* 1.2, 8.2, 8.3, 10.4, 12.1, 12.2, 12.3.
-  *Consumes:* 12.4, 12.5. *Realised in:* U10.
+  *Consumes:* 12.4, 12.5. *Feeds:* 13.4 — the retry path settled with no broker interface opened,
+  which is entry 9's third leg. *Realised in:* U10.
 
 - **12.9 Where results are surfaced.** `[decided]`
   *Decision:* **console only, no report file** — and the `command` 11.9 left blank:
@@ -4727,7 +4729,7 @@ and Part 4 of `03-roadmap.md`).
   | **Using the CLI** | `docker compose run --rm cli` (9.3), the Git Bash / `winpty` note (9.6), then 1.2's thirteen steps as the run that shows the system — **including both outcomes of step 6** | DoD *Interactive CLI*; *Documentation* — "CLI client usage" |
   | **How it works** | the sequence diagram. **Its format and placement are 13.2's, its count 13.3's** | DoD *System Design*; R17 |
   | **Tests** | what runs at launch, the four scenario names one line each (12.2), re-running (12.9), the lint and type commands (12.10), and 11.6's determinism boundary — written with `down`, not `down -v` | DoD *Test Automation*; *Documentation* — "test instructions"; §5 |
-  | **Trade-offs** | 13.4's content, closing with what was deliberately not built (Part 5, by name) | *Documentation* — "design trade-offs"; §7 |
+  | **Trade-offs** | 13.4's content **in 13.4's order** — foundational decisions first — closing with what was deliberately not built (`docs/future-work.md`, 13.7) | *Documentation* — "design trade-offs"; §7 |
   | **Assumptions** | the fifteen lines 13.6 marks **†**, one line each | §7; R23 |
   | *(closing line)* | one sentence pointing at `docs/how-this-was-built.md` | 14.5, narrowed — below |
 
@@ -4831,38 +4833,78 @@ and Part 4 of `03-roadmap.md`).
   excludes choices with no genuine alternative — 1.3 filtered those once already, and a section
   that defends `ruff` buries the nine that matter.
 
+  *The rule that orders them, and it is a second axis rather than a second filter:* **a decision the
+  rest of the system stands on goes first.** A reviewer questions a foundation early or not at all,
+  so answering before the question forms is what keeps it from being asked; an entry answering a
+  visible gap invites the question by naming it, and lands better once the ground under it is
+  settled. **Membership is the rule above; order is this one, and nothing is dropped for ranking
+  low.**
+  *What a low rank means instead — this is the working half of it:* the entry leads with the wrong
+  half of its own reasoning. Four of the nine rested their case on what was saved rather than on
+  what is structurally absent, and every one of the four had the structural reason already written
+  in the record it summarises. Ranking low is an instruction to rewrite, never to delete.
+  *Rejected — ordering by the membership rule alone:* it already selects these entries, so reusing
+  it would put the same gap-shaped items at the top of both this section and 13.7, which reads as
+  one list printed twice.
+
   | # | Entry | Assembled from |
   |---|---|---|
   | 1 | RabbitMQ and PostgreSQL, chosen as a pair | 2.1, 2.2, A1 |
-  | 2 | **The publish happens after the commit** — the accepted lost event, the `outbox` row that records it, and the experiment that shows it | 7.5, 7.6, 9.4, 11.11, FW2 |
+  | 2 | **A synchronous runtime, chosen once for the whole system** — not a layer at a time; what it costs while it stands, and the condition that turns it over | 2.4, 7.7, FW12 |
   | 3 | Retry through a dead-letter exchange and a TTL, not an immediate requeue | 8.2, 8.3 |
-  | 4 | A synchronous runtime, and the condition that would turn it over | 2.4, FW12 |
-  | 5 | One worker, and nothing in the code assumes it | 8.5, 8.9, FW7 |
-  | 6 | Every launch starts from empty, and there is no second test stack | 11.6, 11.7, FW13 |
-  | 7 | No schema migrations, and the condition that reverses it | 4.6, FW16 |
-  | 8 | The tests assert through the contract, never through the schema | 12.3 |
-  | 9 | **No CI server, and what stands in for one** | 14.3, FW19 |
+  | 4 | **The publish happens after the commit** — the accepted lost event, the `outbox` row that records it, and the experiment that shows it | 7.5, 7.6, 9.4, 11.11, FW2 |
+  | 5 | **Migrations act on a schema holding data that must survive the change, and this one holds none** — why `create_all`, and what reverses it | 4.6, 11.7, FW16 |
+  | 6 | **A CI server is shared infrastructure, not a service this repository defines** — what runs instead, and what the gap costs | 14.3, FW19 |
+  | 7 | **Every launch starts from empty**, which is the property an ephemeral test environment exists to provide — and why there is no second stack | 11.6, 11.7, FW13 |
+  | 8 | One worker, and nothing in the code assumes it | 8.5, 8.9, FW7 |
+  | 9 | **No test reaches around the real thing** — not past the contract to the schema, not past infrastructure to a double, not past HTTP to the broker | 12.3, 12.6, 12.8 |
 
-  *Entry 2 is the only one carrying a command, and that is deliberate:* `docker compose stop
+  *Entry 2 is the decision with the widest blast radius, and the entry has to say why it was taken
+  once rather than incrementally.* Moving to `async` is not a layer's choice: 3.5's `UnitOfWork`,
+  every repository, every use case and both composition roots go together, the drivers change with
+  them, and the unit set acquires a plugin that costs it the "free" standing `CLAUDE.md` §5 admits
+  it under. `domain/` is the one layer that would not move. **What makes it a decision rather than a
+  default is that the cost of the side taken is named too:** 7.7's publisher lock exists because the
+  runtime is synchronous and `async` would delete it, and a `PATCH` against an unreachable broker
+  holds a pool thread for up to twice the configured timeout. *Not written as a cost of `async`
+  alone:* synchronous is equally a colour, every function in the system carries it today, and an
+  argument that applies to both sides decides nothing.
+
+  *Entry 4 is the only one carrying a command, and that is deliberate:* `docker compose stop
   rabbitmq`, then a status update — `200`, and the order stays `PENDING`. 11.11 named the command,
   9.4 sized the CLI's 15 s timeout so that the experiment cannot contradict the page describing
   it, and 11.8 sent the path here rather than publish the database port for it. **An invitation to
   disprove us reads stronger than a paragraph asserting we thought about it.**
 
-  *Entry 6 leads with the clean start, not with the absence of isolation.* Nothing is persisted,
+  *Entry 7 leads with the clean start, not with the absence of isolation.* Nothing is persisted,
   so no run inherits another's residue — which is the property an ephemeral test environment
   exists to provide, and this environment has it. Leading with what is missing would raise the
   objection before the answer; and the entry names FW13 as this project's own future work, which
   is what shows the norm was known rather than overlooked.
 
-  **No CI server, and what stands in for one.** Nothing runs by itself when a commit lands: the
-  linter, the type checker and the unit tests run locally before each one, and `docker compose up`
-  runs the integration suite in front of whoever launched it. Running a Jenkins alongside the stack
-  was weighed and priced — a plugin set able to drive those commands builds in about nine minutes on
-  a clean cache, paid by whoever launches this first — and the server-free tool that would have
-  validated a pipeline without one has had no release since 2023. What the gap costs is a check
-  skipped locally with nothing to catch it, which one author carries by discipline and a team cannot;
-  a CI server is in the future-work register.
+  **Entry 6 leads with where a CI server belongs, not with the fact that none runs.** It is
+  infrastructure shared across projects rather than a service in the file R14 defines — 11.1 closed
+  that list at seven and 12.10 rejected an eighth one-shot on the same ground — so the shape it
+  would take is a server that already exists, pointed at 14.1's public repository, with the pipeline
+  committed beside the code. **Every check such a pipeline would run already runs:** the linter, the
+  type checker and the unit tests before each commit (14.7), and the integration suite inside
+  `docker compose up`, in front of whoever launched it (11.3, 11.4). What is missing is the trigger,
+  not a check. A Jenkins alongside the stack was weighed and priced before it was declined — a plugin
+  set able to drive those commands builds in about nine minutes on a clean cache, paid by whoever
+  launches this first — and the server-free tool that would have validated a pipeline without one has
+  had no release since 2023. What the gap costs is a check skipped locally with nothing to catch it,
+  which one author carries by discipline and a team cannot.
+
+  *Entry 9 is three closed decisions stated as one principle, because they are one.* 12.3 keeps the
+  integration suite on the contract instead of reading the schema behind it; 12.6 keeps the unit set
+  free of test doubles; 12.8 settles the retry path with no broker interface opened, no clock moved
+  and no configuration tuned. Each was decided on its own ground and all three land in the same
+  place: **nothing in the suite is allowed a shortcut around the thing it claims to verify.** One
+  entry carries them, and the section stays at nine.
+  *The cost it names, because an entry that states only a principle is a claim:* the port failure
+  paths — `PublishFailed`, `TransactionFailed`, `OutboxWriteFailed` — are reached by breaking
+  infrastructure by hand (11.11) rather than on demand. **12.6 accepted that cost rather than
+  deferring it**, which is what puts it in this section and keeps it out of 13.7's register.
 
   *Form, and it is 1.4's rule made concrete.* No entry carries an item number: "see 7.5" is noise
   to a reader who has not opened the planning record, and 14.5 requires the README to stand alone.
@@ -4872,14 +4914,17 @@ and Part 4 of `03-roadmap.md`).
 
   *What closes the section:* six lines naming what a reviewer would look for and not find —
   authentication, driver endpoints beyond registration, order filtering and paging, structured
-  order items, metrics and tracing, an isolated test environment — then one line pointing at Part 5
-  of `03-roadmap.md` for the full register. **No `FW` code appears in the README**; the codes are
-  internal and carry no meaning to a reader.
+  order items, metrics and tracing, an isolated test environment — then one line pointing at
+  `docs/future-work.md` for the full register (13.7). **No `FW` code appears in the README**; the
+  codes are internal and carry no meaning to a reader.
+  *The pointer moved off Part 5 when 13.7 gave the register a reader's form.* It now sends a
+  reviewer **out** of `.claude/plans/` rather than into it, which is what 14.5 asks of a README that
+  has to stand alone; the planning record keeps its own single link, at the section's end.
 
   *A different candidate for this slot was rejected in review, and its content placed rather than
   dropped.* What the launch does not gate — no report file (12.9), no lint or type gate (12.10) —
   has no heavy alternative under the rule above; it is a note, not a trade-off. **That is what
-  separates it from entry 9,** which names the same missing automatic gate and does have one: a
+  separates it from entry 6,** which names the same missing automatic gate and does have one: a
   Jenkins service was priced before it was declined. Both records read *Feeds:
   13.4*, so: `--junit-xml=` becomes one sentence in *Tests*, beside the decision it reverses, and
   12.10's two `docker compose run --rm tests` commands go to `docs/how-this-was-built.md` beside
@@ -4892,7 +4937,8 @@ and Part 4 of `03-roadmap.md`).
   what 1.4 forbids. **The squash-merge and branch workflow** — process rather than design, and
   14.5's file already holds it.
   *Source:* R19, DoD *Documentation*, `CLAUDE.md` §7. *Constrained by:* 1.2, 1.4, 2.1, 2.2, 2.4,
-  4.6, 7.5, 7.6, 8.2, 8.3, 8.5, 8.9, 9.4, 11.6–11.8, 11.11, 12.3, 12.9, 12.10, 13.1, 14.3, 14.5.
+  4.6, 7.5, 7.6, 7.7, 8.2, 8.3, 8.5, 8.9, 9.4, 11.6–11.8, 11.11, 12.3, 12.6, 12.8, 12.9, 12.10,
+  13.1, 13.7, 14.3, 14.5.
   *Narrows:* 13.1's Tests row, and 12.9's and 12.10's *Feeds* lines. *Realised in:* U13.
 
 - **13.5 `docs/ai-log.md`.** `[decided]`
