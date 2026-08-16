@@ -1,9 +1,9 @@
-"""What the core asks of the outside world, and the transaction boundary.
+"""Ports the core requires of the outside world, and the transaction boundary.
 
-Protocols rather than base classes: an adapter satisfies one by shape, so this module
-imports nothing from infrastructure/ while infrastructure/ imports it.
+Protocols rather than base classes: an adapter satisfies one structurally, so this
+module imports nothing from infrastructure/ while infrastructure/ imports it.
 
-Each port error sits above the port that raises it.
+Each port error is declared above the port that raises it.
 """
 
 from datetime import datetime
@@ -27,10 +27,10 @@ class OrderRepository(Protocol):
     def get(self, order_id: UUID) -> Order | None: ...
 
     def get_for_update(self, order_id: UUID) -> Order | None:
-        """Lock the order and return it, holding the lock for the whole transaction.
+        """Lock the order and return it, holding the lock until the transaction ends.
 
-        Write paths only. A read path taking this would block writers for the sake
-        of a value it does not change.
+        For write paths only: taking this lock on a read path would block writers
+        needlessly.
         """
         ...
 
@@ -51,13 +51,11 @@ class DriverRepository(Protocol):
     def claim_next_available_driver(self) -> Driver | None:
         """Lock and return the earliest-registered available driver, or None.
 
-        The ordering is a convention rather than a business rule: any available driver
-        satisfies the requirement, and oldest-first is chosen so that a test can assert
-        which one was claimed. A preference expressing business intent would be a rule,
-        and would move into domain/ with a criteria argument added here.
+        Oldest-first is a convention, not a business rule: any available driver
+        satisfies the requirement, and a fixed order makes the choice assertable.
 
-        The driver comes back locked and not yet marked busy. The caller marks and saves
-        it inside the same transaction.
+        The driver is returned locked and not yet marked busy. The caller must mark
+        and save it within the same transaction.
         """
         ...
 
@@ -72,7 +70,11 @@ class OutboxStore(Protocol):
         ...
 
     def mark_published(self, event_id: UUID, now: datetime) -> None:
-        """Raises OutboxWriteFailed."""
+        """Record that the event reached the broker.
+
+        Raises:
+            OutboxWriteFailed: The outbox row could not be updated.
+        """
         ...
 
 
@@ -82,7 +84,11 @@ class PublishFailed(Exception):
 
 class EventPublisher(Protocol):
     def publish(self, event: OrderReadyEvent) -> None:
-        """Raises PublishFailed."""
+        """Send the event to the broker.
+
+        Raises:
+            PublishFailed: The event did not reach the broker.
+        """
         ...
 
 
@@ -93,8 +99,8 @@ class TransactionFailed(Exception):
 class UnitOfWork(Protocol):
     """One transaction, holding the repositories bound to it.
 
-    Leaving the block without commit() rolls back. It is re-enterable: the outbox row is
-    marked published after the commit, in a second transaction.
+    Leaving the block without calling commit() rolls back. The context manager is
+    re-enterable, so a caller may open a second transaction after the first commits.
     """
 
     orders: OrderRepository
@@ -106,5 +112,9 @@ class UnitOfWork(Protocol):
     def __exit__(self, *exc: object) -> None: ...
 
     def commit(self) -> None:
-        """Raises TransactionFailed."""
+        """Commit the transaction.
+
+        Raises:
+            TransactionFailed: The transaction could not be committed.
+        """
         ...

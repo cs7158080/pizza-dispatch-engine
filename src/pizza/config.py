@@ -1,7 +1,8 @@
-"""The configuration boundary: environment strings turned into typed settings.
+"""Configuration boundary: environment strings validated into typed settings.
 
-Nothing here reads the environment at import time. Loading is a call, made once by a
-composition root, so importing this module can never fail on a missing variable.
+Nothing here reads the environment at import time. Loading is an explicit call made
+once by a composition root, so importing this module cannot fail on a missing
+variable.
 """
 
 from collections.abc import Mapping
@@ -19,7 +20,7 @@ class ConfigurationError(Exception):
 
 
 class ServiceSettings(BaseModel):
-    """Read by the api and the worker."""
+    """Settings required by the api and the worker."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -32,7 +33,7 @@ class ServiceSettings(BaseModel):
 
 
 class ClientSettings(BaseModel):
-    """Read by the CLI and the integration suite."""
+    """Settings required by the CLI and the integration suite."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -70,8 +71,18 @@ def _describe(error: ValidationError) -> str:
 
 
 def load_service_settings(env: Mapping[str, str]) -> ServiceSettings:
+    """Read the service settings from the environment.
+
+    Raises:
+        ConfigurationError: A variable is missing or does not validate.
+    """
     return _load(ServiceSettings, env)
 
 
 def load_client_settings(env: Mapping[str, str]) -> ClientSettings:
+    """Read the client settings from the environment.
+
+    Raises:
+        ConfigurationError: A variable is missing or does not validate.
+    """
     return _load(ClientSettings, env)

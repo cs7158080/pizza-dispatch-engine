@@ -1,8 +1,8 @@
-"""Whether the database can be reached, answered by running a statement.
+"""Database reachability check.
 
-A statement rather than a pool setting: the check must mean the same thing
-whatever the pool is configured to do. Translating the failure here is the same
-duty the repositories have — nothing SQLAlchemy-shaped leaves this module.
+The check runs a statement rather than inspecting the pool, so its meaning does not
+depend on the pool configuration. The SQLAlchemy failure is translated here: nothing
+SQLAlchemy-shaped leaves this module.
 """
 
 from sqlalchemy import Engine, text
@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 
 def database_reachable(engine: Engine) -> bool:
+    """Return whether a statement can be executed against the database."""
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))

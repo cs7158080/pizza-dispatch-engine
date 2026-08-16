@@ -1,9 +1,8 @@
-"""The record of every event, written in the transaction that caused it.
+"""Outbox store: a record of every event, written in the transaction that caused it.
 
-The row is the evidence that an event was meant to go out. It is written with the
-same function that produces the published message, so the two cannot describe
-different things, and it is not committed here: the commit belongs to the use case,
-which is what makes the row and the status change atomic.
+The payload is produced by the same serializer as the published message, so the two
+cannot diverge. Nothing is committed here — the use case owns the commit, which is
+what makes the outbox row and the status change atomic.
 """
 
 import json
@@ -35,12 +34,16 @@ class SqlAlchemyOutboxStore(OutboxStore):
         )
 
     def mark_published(self, event_id: UUID, now: datetime) -> None:
-        """Raises OutboxWriteFailed."""
+        """Record that the event reached the broker.
+
+        Raises:
+            OutboxWriteFailed: The outbox row is missing or could not be updated.
+        """
         try:
             row = self._session.get(OutboxModel, event_id)
             if row is None:
-                # The row was written in a transaction that has committed, so its
-                # absence is a broken invariant rather than a race.
+                # The row was written in a transaction that has committed, so a
+                # missing row is a broken invariant rather than a race.
                 raise OutboxWriteFailed(f"no outbox row for event {event_id}")
             row.published_at = now
         except SQLAlchemyError as error:

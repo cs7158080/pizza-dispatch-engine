@@ -118,6 +118,77 @@ queue, which redelivers it after a short delay — that is what steps 7 and 8 th
 the most interesting path in the system. If a driver *is* already available, the order is assigned
 immediately and steps 7 and 8 have nothing to do. Neither is a failure.
 
+## How it works
+
+One order, from the moment it is placed to the moment it is delivered — the path the steps above
+walk. Five participants, named after their Compose services, so a line here and
+`docker compose logs worker` use the same word.
+
+```mermaid
+sequenceDiagram
+    participant cli
+    participant api
+    participant postgres
+    participant rabbitmq
+    participant worker
+
+    Note over cli,worker: An order is placed and advanced to PREPARING
+    cli->>api: POST /orders
+    api->>postgres: INSERT order (RECEIVED, PENDING)
+    api-->>cli: 201 and the new id
+    cli->>api: GET /orders
+    api->>postgres: SELECT orders
+    api-->>cli: the order, RECEIVED
+    cli->>api: PATCH /orders/{id}/status PREPARING
+    api->>postgres: UPDATE orders
+    api-->>cli: 200
+
+    Note over cli,worker: BAKING publishes the order, and no driver is free
+    cli->>api: PATCH /orders/{id}/status BAKING
+    api->>postgres: UPDATE orders + INSERT outbox
+    api->>rabbitmq: publish ORDER_READY
+    api-->>cli: 200
+    rabbitmq->>worker: deliver ORDER_READY
+    worker->>postgres: claim an AVAILABLE driver
+    postgres-->>worker: none
+    worker->>rabbitmq: reject, do not requeue
+    Note over rabbitmq: the message parks in a wait queue<br/>and is redelivered after a TTL
+
+    Note over cli,worker: A driver registers, and the redelivery assigns them
+    cli->>api: POST /drivers
+    api->>postgres: INSERT driver (AVAILABLE)
+    api-->>cli: 201 and the new id
+    rabbitmq->>worker: redeliver ORDER_READY
+    worker->>postgres: claim an AVAILABLE driver
+    postgres-->>worker: the driver
+    worker->>postgres: assign it (ASSIGNED, driver BUSY)
+    worker->>rabbitmq: ack
+    cli->>api: GET /orders/{id}
+    api->>postgres: SELECT the order, then its driver
+    api-->>cli: ASSIGNED, the driver nested
+
+    Note over cli,worker: READY changes nothing, BAKING is refused, DELIVERED releases
+    cli->>api: PATCH /orders/{id}/status READY
+    api->>postgres: UPDATE orders + INSERT outbox
+    api->>rabbitmq: publish ORDER_READY
+    api-->>cli: 200
+    rabbitmq->>worker: deliver ORDER_READY
+    worker->>postgres: the order is already assigned
+    worker->>rabbitmq: ack, nothing changes
+    cli->>api: PATCH /orders/{id}/status BAKING
+    api-->>cli: 409, the chain is forward-only
+    cli->>api: PATCH /orders/{id}/status DELIVERED
+    api->>postgres: UPDATE orders, release the driver
+    api-->>cli: 200
+    cli->>api: GET /orders/{id}
+    api-->>cli: COMPLETED, the driver AVAILABLE
+```
+
+Two things worth reading twice. **`UPDATE orders + INSERT outbox` is one transaction** — the status
+change and the record of the event it raises commit together or not at all. And **the publish
+happens after that commit**, which is the trade-off named below: if the broker is unreachable the
+status change still succeeds and the event is lost, with the outbox row left as the evidence.
+
 ## Tests
 
 The suite runs automatically on every `docker compose up`, against the live stack, and prints its

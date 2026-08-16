@@ -1,7 +1,6 @@
-"""The order rules, proved against the entity alone with no test double.
+"""Unit tests for the order rules, exercised against the entity alone.
 
-Each test names the failure it would catch and why that failure would otherwise be
-invisible until the whole system is running.
+Each test states the scenario it covers and the failure it would catch.
 """
 
 from datetime import UTC, datetime
@@ -33,11 +32,11 @@ def _an_order() -> Order:
 
 
 def test_the_lifecycle_walks_forward_once_per_step() -> None:
-    """The forward path, and the two flags that hang off it.
+    """Scenario: an order walks the full lifecycle, one status at a time.
 
-    A publish trigger firing on the wrong transition would dispatch an order that is not
-    baking yet; a release flag on the wrong one would return a driver mid-delivery.
-    Neither shows up anywhere but here until an end-to-end run.
+    Why it matters: a publish flag on the wrong transition would dispatch an order
+    that is not baking yet, and a release flag on the wrong one would return a driver
+    mid-delivery. Neither is visible outside this test until an end-to-end run.
     """
     order = _an_order()
     expected = [
@@ -55,12 +54,11 @@ def test_the_lifecycle_walks_forward_once_per_step() -> None:
 
 
 def test_skipping_reversing_and_repeating_are_all_refused() -> None:
-    """The three illegal shapes, and what the error carries.
+    """Scenario: skipping, reversing and repeating a transition are all rejected.
 
-    A skip would make delivery without dispatch a supported path; a repeat that
-    succeeded would publish ORDER_READY twice for one transition. The error names
-    both statuses because an API that cannot name them turns a rule failure into
-    an opaque conflict.
+    Why it matters: a skip would allow delivery without dispatch, and a successful
+    repeat would publish ORDER_READY twice for one transition. The error carries both
+    statuses, without which the API can only report an opaque conflict.
     """
     skipping = _an_order()
     with pytest.raises(IllegalTransition) as refused:
@@ -81,12 +79,12 @@ def test_skipping_reversing_and_repeating_are_all_refused() -> None:
 
 
 def test_an_order_admits_exactly_one_driver() -> None:
-    """Both clauses of the assignment guard.
+    """Scenario: the assignment guard, on an assigned order and on a delivered one.
 
-    Dropping "no driver yet" assigns a second driver to an order already on its way.
-    Dropping "not delivered" lets a retrying event assign a driver after the only
-    transition that could release them has passed, leaking that driver out of the pool
-    permanently — which no interface reports.
+    Why it matters: without the first clause a second driver is given to an order
+    already on its way. Without the second, a retried event assigns a driver after
+    the only transition that releases them, leaking that driver from the pool with no
+    interface reporting it.
     """
     assigned = _an_order()
     assert assigned.can_be_assigned() is True
@@ -100,11 +98,11 @@ def test_an_order_admits_exactly_one_driver() -> None:
 
 
 def test_a_failed_dispatch_survives_delivery() -> None:
-    """Delivery does not erase a failed dispatch.
+    """Scenario: an order marked FAILED keeps that state after being delivered.
 
-    FAILED is the only assignment state written deliberately, and the only one with no
-    copy anywhere else. Overwriting it on delivery would erase the record that no driver
-    was ever found, through a status update that has nothing to do with it.
+    Why it matters: FAILED is recorded nowhere else. Overwriting it on delivery would
+    erase the record that no driver was ever found, through an unrelated status
+    update.
     """
     order = _an_order()
     order.mark_dispatch_failed()
@@ -118,11 +116,11 @@ def test_a_failed_dispatch_survives_delivery() -> None:
 
 
 def test_giving_up_is_ignored_once_a_driver_is_assigned() -> None:
-    """Giving up is ignored once a driver is on the way.
+    """Scenario: giving up on dispatch is ignored once a driver has been assigned.
 
-    Two messages per order are in flight, so one can exhaust its retry budget after the
-    other has already assigned. Without the guard the exhausted message would mark an
-    order FAILED while a driver is delivering it.
+    Why it matters: two messages per order are in flight, so one can exhaust its retry
+    budget after the other has assigned. Without the guard, the exhausted message
+    would mark an order FAILED while a driver is delivering it.
     """
     order = _an_order()
     driver_id = uuid4()

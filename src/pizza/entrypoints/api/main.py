@@ -1,13 +1,11 @@
-"""The api service's composition root: the one module that builds the adapters.
+"""Composition root of the api service: the only module that builds the adapters.
 
-Everything here is a construction or a registration. The settings are loaded at
-import, before anything else can run, so a bad environment costs one line on
-standard error and a non-zero exit rather than a service that starts and then
-fails every request.
+Settings are loaded at import time, so an invalid environment exits non-zero with
+one message instead of starting a service that fails every request.
 
 Startup opens no connection: `create_engine` and the publisher both perform their
-I/O on first use, so this service starts whether or not the database and the
-broker are up.
+I/O on first use, so the service starts whether or not the database and the broker
+are up.
 """
 
 import os
@@ -41,7 +39,7 @@ configure_logging(settings.log_level)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """Build what outlives a request, and close it when the process stops."""
+    """Build the resources that outlive a request, and close them on shutdown."""
     engine = create_engine(settings.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(engine, autoflush=False, expire_on_commit=False)
     publisher = PikaEventPublisher(

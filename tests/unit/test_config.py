@@ -1,7 +1,7 @@
-"""The configuration boundary.
+"""Unit tests for the configuration boundary.
 
-Every test passes a literal mapping instead of touching `os.environ`, so no
-test can affect another and repeated runs give the same result.
+Every test passes a literal mapping instead of touching `os.environ`, so no test can
+affect another and repeated runs give the same result.
 """
 
 import pytest
@@ -19,14 +19,12 @@ _SERVICE_ENV = {
 
 
 def test_complete_environment_loads() -> None:
-    """A full environment yields both settings objects, with two conversions.
+    """Scenario: a complete environment loads both settings objects.
 
-    The environment holds only strings, so a number that stayed a string would
-    surface as a type error deep inside the broker adapter or the worker rather
-    than here; and a trailing slash that survived would become a double slash in
-    every URL the CLI and the test suite build. The mappings also carry
-    variables outside the prefix, which the loader must ignore rather than
-    reject.
+    Why it matters: the environment holds only strings, so a number left unconverted
+    would surface as a type error inside the broker adapter rather than here, and a
+    surviving trailing slash would become a double slash in every URL built from it.
+    The mappings also carry unprefixed variables, which the loader must ignore.
     """
     service = load_service_settings({**_SERVICE_ENV, "PATH": "/usr/local/bin"})
 
@@ -43,12 +41,11 @@ def test_complete_environment_loads() -> None:
 
 
 def test_missing_variable_names_it() -> None:
-    """A missing variable fails loudly, naming the variable and not the field.
+    """Scenario: a missing variable is reported by its environment name.
 
-    This is what configuration validation at startup means: the process must not
-    start on a value nobody supplied. The message has to name
-    `PIZZA_DATABASE_URL`, because that is what the reader can fix —
-    `database_url` would send them to the source instead.
+    Why it matters: the process must not start on a value nobody supplied, and the
+    message must name `PIZZA_DATABASE_URL` rather than the field `database_url`,
+    since the environment variable is what the reader can fix.
     """
     incomplete = {
         key: value for key, value in _SERVICE_ENV.items() if key != "PIZZA_DATABASE_URL"
@@ -61,11 +58,11 @@ def test_missing_variable_names_it() -> None:
 
 
 def test_unknown_prefixed_variable_is_rejected() -> None:
-    """A mistyped variable is rejected rather than ignored.
+    """Scenario: an unknown prefixed variable is rejected rather than ignored.
 
-    Under Compose every variable is supplied, so a typo produces an extra
-    variable rather than a missing one. Ignoring it would start the service on a
-    default nobody chose, and nothing anywhere would report a fault.
+    Why it matters: under Compose every variable is supplied, so a typo produces an
+    extra variable rather than a missing one. Ignoring it would start the service on
+    a default nobody chose, with no interface reporting a fault.
     """
     with pytest.raises(ConfigurationError) as caught:
         load_service_settings({**_SERVICE_ENV, "PIZZA_LOG_LEVL": "DEBUG"})
@@ -74,12 +71,11 @@ def test_unknown_prefixed_variable_is_rejected() -> None:
 
 
 def test_out_of_range_values_are_rejected() -> None:
-    """Values of the right type but outside the allowed range are still faults.
+    """Scenario: values of the right type but outside the allowed range are rejected.
 
-    A retry cap of zero would mark an order FAILED on the first rejection with
-    no retry at all, and an unknown log level would be applied as something
-    else. Neither is reported by any interface as a configuration fault, so the
-    bounds are the only guard.
+    Why it matters: a retry cap of zero would mark an order FAILED on the first
+    rejection with no retry at all, and an unknown log level would be silently
+    reinterpreted. Neither is reported anywhere, so the bounds are the only guard.
     """
     with pytest.raises(ConfigurationError):
         load_service_settings({**_SERVICE_ENV, "PIZZA_DISPATCH_MAX_RETRIES": "0"})

@@ -1,12 +1,11 @@
-"""The tables, and the two invariants a single writer cannot hold for itself.
+"""SQLAlchemy table definitions.
 
-The schema enforces what concurrency can break: that one driver carries at most one
-assigned order, and that an assigned order names both a driver and a time. Everything
-else a rule can hold in one place is held in the layer that owns it.
+The constraints here cover the two invariants concurrent writers can break: a driver
+carries at most one assigned order, and an assigned order has both a driver and a
+time. All other rules are enforced in the layer that owns them.
 
-Columns carry no `server_default`: identity is generated in the application and every
-timestamp is one read of the clock, so a database default would be a second clock no
-test can control.
+No column carries a `server_default`: identifiers and timestamps are produced by the
+application, so a database default would act as a second, uncontrollable clock.
 """
 
 from datetime import datetime
@@ -24,7 +23,7 @@ from pizza.domain.order import AssignmentState, OrderStatus
 
 
 def _one_of(column: str, values: type[Enum]) -> str:
-    """Render a CHECK over an enum's values, so the column cannot outlive them."""
+    """Render a CHECK constraint restricting the column to the enum's values."""
     listed = ", ".join(f"'{member.value}'" for member in values)
     return f"{column} IN ({listed})"
 

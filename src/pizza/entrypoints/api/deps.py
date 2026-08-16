@@ -1,13 +1,12 @@
-"""The seam the routes receive their use cases through.
+"""FastAPI dependencies through which the routes receive their use cases.
 
-`Wiring` names ports and callables only, never an implementation, which is what
-lets the composition root be the one module that imports infrastructure. It is
-built there and read from the request, so nothing here is bound at import time.
+`Wiring` names ports and callables only, never an implementation, which keeps the
+composition root the only module importing infrastructure. It is built there and
+read off the request, so nothing here is bound at import time.
 
-A unit of work is built per request: it holds the session it opened, and two
-requests genuinely run in parallel, so a shared one would have two threads
-overwriting one transaction. The clock and the publisher are shared, the
-publisher being thread-safe by its own lock.
+A unit of work is built per request, since it holds the session it opened and
+concurrent requests would otherwise share one transaction. The clock and the
+publisher are shared; the publisher is thread-safe through its own lock.
 """
 
 from collections.abc import Callable
@@ -24,7 +23,7 @@ from pizza.application.use_cases.register_driver import RegisterDriver
 
 @dataclass(frozen=True)
 class Wiring:
-    """What the composition root hands the routes."""
+    """The ports and factories the composition root hands to the routes."""
 
     new_unit_of_work: Callable[[], UnitOfWork]
     clock: Clock
@@ -33,7 +32,7 @@ class Wiring:
 
 
 def _wiring(request: Request) -> Wiring:
-    # Through a local, because application state is untyped.
+    # Assigned to a local first: application state is untyped.
     wiring: Wiring = request.app.state.wiring
     return wiring
 

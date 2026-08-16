@@ -1,13 +1,11 @@
-"""The wire format of an event: JSON, encoded UTF-8.
+"""Wire format of an event: JSON encoded as UTF-8.
 
-One pair of functions produces both copies of a message — the one published to the
-broker and the one stored in the outbox row — so the record of what was meant to go
-out cannot drift from what went out.
+These functions produce both copies of a message — the one published to the broker
+and the one stored in the outbox row — so the two cannot diverge.
 
-The reader is tolerant: fields it does not know are ignored, so a field may be added
-without coordinating both sides. Anything it cannot turn into a valid event raises
-`SerializationError`, and nothing else escapes it — decoding happens inside this
-boundary so that a caller has one family of error to catch.
+Reading is tolerant: unknown fields are ignored, so a field can be added without
+coordinating both sides. Anything that cannot be turned into a valid event raises
+`SerializationError`, and no other exception escapes this module.
 """
 
 import json
@@ -22,6 +20,7 @@ class SerializationError(Exception):
 
 
 def serialize(event: OrderReadyEvent) -> bytes:
+    """Render the event as the JSON message published to the broker."""
     document = {
         "event_type": OrderReadyEvent.EVENT_TYPE,
         "event_id": str(event.event_id),
@@ -32,7 +31,11 @@ def serialize(event: OrderReadyEvent) -> bytes:
 
 
 def deserialize(raw: bytes) -> OrderReadyEvent:
-    """Build an event from a published message. Raises `SerializationError`."""
+    """Build an event from a published message.
+
+    Raises:
+        SerializationError: The bytes do not describe a valid event.
+    """
     try:
         document = json.loads(raw.decode("utf-8"))
         occurred_at = datetime.fromisoformat(document["occurred_at"])
@@ -50,9 +53,8 @@ def deserialize(raw: bytes) -> OrderReadyEvent:
 def deserialize_or_none(raw: bytes) -> OrderReadyEvent | None:
     """Build an event, or return None when the bytes do not describe one.
 
-    For a caller that may not name `SerializationError`. The absent event is a
-    value the signature forces every caller to handle, so nothing else that goes
-    wrong inside is turned into one.
+    For callers that handle a malformed message as a value rather than an exception.
+    Only `SerializationError` is converted to None.
     """
     try:
         return deserialize(raw)

@@ -1,9 +1,10 @@
-"""What a request may carry, and what a response answers with.
+"""Request and response models of the HTTP API.
 
 The request models are the edge validation: unknown fields are forbidden and every
-bound is declared, so nothing hand-written stands between the wire and the core. The
-response models assemble the shapes the API promises — the nested driver among them —
-from the types the application layer returns, which is why the core never sees one.
+bound is declared, so no hand-written check stands between the wire and the core.
+
+The response models assemble the shapes the API promises, including the nested
+driver, from the types the application layer returns.
 """
 
 from datetime import datetime
@@ -16,8 +17,8 @@ from pizza.application.queries import OrderDetail
 from pizza.domain.driver import DriverStatus
 from pizza.domain.order import AssignmentState, Order, OrderStatus
 
-# Trimmed before the length is checked, so a value of spaces is rejected rather
-# than stored, and what is stored is what was measured.
+# Trimmed before the length is checked, so a value of only spaces is rejected and
+# the stored value is the one that was measured.
 _Text100 = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)
 ]
@@ -27,7 +28,7 @@ _Text200 = Annotated[
 
 
 class _Request(BaseModel):
-    """Every request model: unknown fields are rejected rather than ignored."""
+    """Base of every request model: unknown fields are rejected, not ignored."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -39,7 +40,7 @@ class CreateOrderRequest(_Request):
 
 
 class UpdateStatusRequest(_Request):
-    # The domain enum, so an unrecognised status never reaches the core.
+    # The domain enum: an unrecognised status is rejected before reaching the core.
     status: OrderStatus
 
 
@@ -48,7 +49,7 @@ class RegisterDriverRequest(_Request):
 
 
 class Created(BaseModel):
-    """The body of both creations: the one fact the client could not predict."""
+    """Body returned by both creation endpoints: the generated identifier."""
 
     id: UUID
 
@@ -94,7 +95,7 @@ class OrderResponse(BaseModel):
 
 
 class OrderSummary(BaseModel):
-    """The light representation the list answers with: no driver, so no second read."""
+    """Light representation used by the list endpoint: no driver, so no second read."""
 
     id: UUID
     customer_name: str
