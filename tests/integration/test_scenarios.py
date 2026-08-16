@@ -48,6 +48,11 @@ def _is_assigned(order: dict[str, Any]) -> bool:
     return bool(order["assignment_state"] == "ASSIGNED")
 
 
+def _is_waiting_for_a_driver(order: dict[str, Any]) -> bool:
+    """Still looking, and not yet given up — which are two different states."""
+    return bool(order["assignment_state"] == "PENDING" and order["driver"] is None)
+
+
 def test_complete_order_lifecycle(
     client: httpx.Client,
     unique_name: Callable[[str], str],
@@ -95,6 +100,30 @@ def test_complete_order_lifecycle(
     assert final["assignment_state"] == "COMPLETED"
     assert final["driver"]["id"] == driver_id
     assert final["driver"]["status"] == "AVAILABLE"
+
+
+def test_recovery_when_a_driver_registers(
+    client: httpx.Client, unique_name: Callable[[str], str]
+) -> None:
+    """An order with no driver to give it waits, and is dispatched once one exists.
+
+    The most interesting behaviour in the system, and the only scenario that shows
+    the worker surviving something it cannot do: it neither invents an assignment
+    nor dies on the message, and dispatch resumes without anyone asking again. No
+    further status change is sent after the driver registers, so a redelivery of
+    the original message is the only thing that could have produced the result.
+    """
+    order_id = _place_order(client, unique_name("order"))
+    assert _advance(client, order_id, "PREPARING").status_code == 200
+    assert _advance(client, order_id, "BAKING").status_code == 200
+
+    stays(client, order_id, _is_waiting_for_a_driver)
+
+    driver_id = _register_driver(client, unique_name("driver"))
+
+    assigned = wait_until(client, order_id, _is_assigned)
+    assert assigned["driver"]["id"] == driver_id
+    assert assigned["driver"]["status"] == "BUSY"
 
 
 def test_illegal_transition_is_refused(

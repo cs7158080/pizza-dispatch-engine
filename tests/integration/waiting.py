@@ -47,7 +47,7 @@ def wait_until(
     while not predicate(order):
         if time.monotonic() >= deadline:
             raise AssertionError(
-                f"still not true after {TIMEOUT_SECONDS:.0f}s — last order: {order}"
+                f"still not true after {TIMEOUT_SECONDS:.0f}s - last order: {order}"
             )
         time.sleep(POLL_SECONDS)
         order = read_order(client, order_id)
@@ -66,5 +66,5 @@ def stays(client: httpx.Client, order_id: str, predicate: Predicate) -> None:
     while time.monotonic() < deadline:
         order = read_order(client, order_id)
         if not predicate(order):
-            raise AssertionError(f"stopped being true — order: {order}")
+            raise AssertionError(f"stopped being true - order: {order}")
         time.sleep(POLL_SECONDS)
