@@ -1,10 +1,10 @@
-"""Rows in, entities out — the two repositories the core asks for.
+"""SQLAlchemy implementations of the order and driver repositories.
 
-Every conversion between a table row and a domain entity happens here, so nothing
-ORM-shaped leaves this module and the core never learns that SQLAlchemy exists.
+All conversion between table rows and domain entities happens here: nothing
+ORM-shaped leaves this module.
 
-Each repository is bound to one `Session` and cannot outlive it; the unit of work
-builds them.
+Each repository is bound to one `Session` and must not outlive it. The unit of work
+constructs them.
 """
 
 from uuid import UUID
@@ -65,19 +65,19 @@ class SqlAlchemyOrderRepository(OrderRepository):
         return None if row is None else _to_order(row)
 
     def get_for_update(self, order_id: UUID) -> Order | None:
-        """Lock the order and return it, holding the lock for the whole transaction.
+        """Lock the order and return it, holding the lock until the transaction ends.
 
-        The primary-key path get() takes, with the lock added, so the two cannot
-        drift in how they load a row. The lock argument also bypasses the identity
-        map, so the SELECT is issued even for a row this Session already holds.
+        Uses the same primary-key load as get(), with the lock added. The lock
+        argument bypasses the identity map, so the SELECT is issued even for a row
+        this Session already holds.
         """
         row = self._session.get(OrderModel, order_id, with_for_update=True)
         return None if row is None else _to_order(row)
 
     def save(self, order: Order) -> None:
-        # Loaded earlier in this Session by get(), so this resolves from the
-        # identity map; it would issue a SELECT otherwise. A row that is not there
-        # is a broken invariant, and get_one raises rather than writing nothing.
+        # The row was loaded earlier in this Session, so this resolves from the
+        # identity map. A missing row is a broken invariant, and get_one raises
+        # rather than silently writing nothing.
         row = self._session.get_one(OrderModel, order.id)
         row.status = order.status.value
         row.assignment_state = order.assignment_state.value
@@ -85,8 +85,8 @@ class SqlAlchemyOrderRepository(OrderRepository):
         row.assigned_at = order.assigned_at
 
     def list_all(self) -> list[Order]:
-        # The identifier breaks ties, so two orders created inside one clock tick
-        # still come back in a fixed order.
+        # The identifier breaks ties, so orders created within one clock tick still
+        # come back in a stable order.
         query = select(OrderModel).order_by(OrderModel.created_at.desc(), OrderModel.id)
         return [_to_order(row) for row in self._session.scalars(query)]
 
@@ -116,8 +116,8 @@ class SqlAlchemyDriverRepository(DriverRepository):
     def claim_next_available_driver(self) -> Driver | None:
         """Lock and return the earliest-registered available driver, or None.
 
-        The row is locked for the rest of the transaction and is returned unmarked:
-        the caller marks it busy and saves it in that same transaction.
+        The row stays locked until the transaction ends and is returned unmarked:
+        the caller marks it busy and saves it within that same transaction.
         """
         query = (
             select(DriverModel)

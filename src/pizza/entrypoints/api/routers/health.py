@@ -1,7 +1,7 @@
-"""What the healthcheck asks, and the one dependency it reports on.
+"""Health route.
 
-The database only: a status update succeeds while the broker is unreachable, so
-a service that could not reach the broker would be failing a check it passes.
+It reports on the database only: status updates still succeed while the broker is
+unreachable, so a broker fault must not fail the check.
 """
 
 from fastapi import APIRouter, HTTPException

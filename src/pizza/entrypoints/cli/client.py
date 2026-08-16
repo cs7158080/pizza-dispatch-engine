@@ -1,12 +1,12 @@
-"""What the CLI knows about the API, and the three ways a call can fail.
+"""HTTP client for the API, and the three ways a call can fail.
 
-A client holds the published contract and nothing beyond it: the paths, the bodies
-it sends and reads, and the names of the five statuses. It never decides which
-status may follow which — the menu offers all five and the API answers.
+The client holds the published contract and nothing beyond it: the paths, the bodies
+it sends and reads, and the names of the five statuses. It never decides which status
+may follow which; the API does.
 
-Every method returns the parsed body or raises. The three errors below are the
-whole vocabulary a caller has to handle: an answer the contract describes, a call
-that never reached the server, and anything else.
+Every method returns the parsed body or raises. The three errors below are the whole
+vocabulary a caller has to handle: a failure the contract describes, a call that
+never reached the server, and anything else.
 """
 
 from dataclasses import dataclass
@@ -15,38 +15,36 @@ from uuid import UUID
 
 import httpx
 
-# The statuses the API publishes, in the order it declares them. The menu offers
-# every one of them and derives none from another, so this list is displayed and
-# selected from — never used to work out what comes next.
+# The statuses the API publishes, in the order it declares them. Used only for
+# display and selection, never to derive which status follows which.
 STATUSES = ("RECEIVED", "PREPARING", "BAKING", "READY", "DELIVERED")
 
-# One value for every call. It clears the longest bounded wait the API can impose
-# on a status update, so the client never abandons a request the API is about to
-# answer successfully.
+# Applies to every call. It exceeds the longest bounded wait the API can impose on a
+# status update, so the client never abandons a request that is about to succeed.
 _TIMEOUT_SECONDS = 15.0
 
-# The failures the contract describes a body for. Anything else is a defect rather
-# than a covered path, and is shown as one.
+# The failures the contract describes a body for. Anything else is a defect, and is
+# reported as one.
 _DESCRIBED_FAILURES = frozenset({404, 409, 422, 503})
 
 
 @dataclass(frozen=True)
 class FieldFault:
-    """One entry of a validation failure: where it was, and what was wrong."""
+    """One entry of a validation failure: the location and the message."""
 
     location: str
     message: str
 
 
 class CliError(Exception):
-    """Anything that stopped a call from answering."""
+    """Base class for anything that prevented a call from returning a body."""
 
 
 class ApiError(CliError):
-    """The API refused, in one of the ways its contract describes.
+    """The API refused the call in one of the ways its contract describes.
 
-    `detail` is a sentence where the server can state one, and one entry per field
-    where the failure is per-field; the type varies with the class of failure.
+    `detail` is a message where the server states one, and one entry per field where
+    the failure is per-field.
     """
 
     def __init__(self, status: int, detail: str | tuple[FieldFault, ...]) -> None:
@@ -64,7 +62,7 @@ class TransportFailure(CliError):
 
 
 class UnexpectedResponse(CliError):
-    """An answer outside the contract, carried raw so it is not dressed up."""
+    """A response outside the contract, carrying the raw body."""
 
     def __init__(self, status: int, body: str) -> None:
         super().__init__(f"the API answered {status}")
@@ -73,7 +71,7 @@ class UnexpectedResponse(CliError):
 
 
 class ApiClient:
-    """One connection to the API, for the life of the process."""
+    """One HTTP connection to the API, held for the life of the process."""
 
     def __init__(self, base_url: str) -> None:
         self._base_url = base_url
@@ -114,9 +112,14 @@ class ApiClient:
         return order
 
     def _call(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
-        """Perform one request and classify what came back.
+        """Perform one request and classify the response.
 
-        Every method routes through here, so the three shapes are decided once.
+        Every method routes through here, so the classification is made once.
+
+        Raises:
+            ApiError: The API answered with a failure its contract describes.
+            TransportFailure: The call never reached the API.
+            UnexpectedResponse: The response is outside the contract.
         """
         try:
             response = self._http.request(method, path, json=body)
@@ -131,13 +134,13 @@ class ApiClient:
         try:
             return response.json()
         except ValueError as error:
-            # A success that is not JSON is outside the contract, not a fault of
-            # the connection.
+            # A success that is not JSON is outside the contract, not a transport
+            # failure.
             raise UnexpectedResponse(response.status_code, response.text) from error
 
 
 def _detail(response: httpx.Response) -> str | tuple[FieldFault, ...]:
-    """The error body, as the sentence or the field list the contract carries."""
+    """Extract the error detail: a message, a list of field faults, or the raw body."""
     try:
         body: dict[str, Any] = response.json()
     except ValueError:
@@ -152,10 +155,10 @@ def _detail(response: httpx.Response) -> str | tuple[FieldFault, ...]:
 
 
 def _fault(entry: dict[str, Any]) -> FieldFault:
-    """Where one value was rejected, and why.
+    """Build one field fault from a validation entry.
 
-    The leading element is dropped only when it is `body`: a path parameter names
-    its own source, and a failure on the whole body carries nothing else.
+    A leading `body` element is dropped, unless it is the only one: a path parameter
+    names its own source, and a failure on the whole body has nothing else to show.
     """
     parts = [str(part) for part in entry.get("loc", ())]
     if len(parts) > 1 and parts[0] == "body":

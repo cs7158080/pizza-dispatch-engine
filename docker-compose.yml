@@ -1,6 +1,6 @@
 # No named volumes: postgres and rabbitmq write to their own container filesystems, so
-# `docker compose down` leaves nothing behind and the next `up` starts empty. The lines
-# that make the data survive are in README.md, under "Persistence".
+# `docker compose down` leaves nothing behind and the next `up` starts empty. See
+# README.md, under "Persistence", for the lines that make the data survive.
 
 services:
   postgres:
@@ -38,8 +38,8 @@ services:
       target: runtime
     image: pizza-runtime
     command: ["python", "-m", "pizza.entrypoints.schema.main"]
-    # Reads database_url alone; the rest are required by ServiceSettings, which every
-    # service loading it must satisfy in full.
+    # This service reads database_url alone; the rest are supplied because
+    # ServiceSettings requires every field to be present.
     environment:
       PIZZA_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pizza}:${POSTGRES_PASSWORD:-pizza}@postgres:5432/${POSTGRES_DB:-pizza}
       PIZZA_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-pizza}:${RABBITMQ_DEFAULT_PASS:-pizza}@rabbitmq:5672/
@@ -114,8 +114,8 @@ services:
       api:
         condition: service_healthy
 
-  # Not started by `up`: an interactive prompt loop with no terminal reads EOF and exits.
-  # Reached with `docker compose run --rm cli`, which attaches one.
+  # Not started by `up`: an interactive prompt loop with no terminal reads EOF and
+  # exits. Run it with `docker compose run --rm cli`, which attaches a terminal.
   cli:
     build:
       context: .

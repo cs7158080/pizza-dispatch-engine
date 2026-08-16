@@ -1,4 +1,4 @@
-"""The one place the current time enters the system."""
+"""Unit test for the system clock, the one place the current time enters."""
 
 from datetime import UTC, timedelta
 
@@ -6,12 +6,11 @@ from pizza.infrastructure.clock import SystemClock
 
 
 def test_the_clock_reads_utc_with_an_offset() -> None:
-    """`now()` is timezone-aware and its offset is zero.
+    """Scenario: `now()` returns a timezone-aware value whose offset is zero.
 
-    Every timestamp in the system is one read of this clock, and a naive
-    `datetime.now()` is the one-character version of this method that satisfies the
-    type checker: the value reaches a `timestamptz` column and the API looking the
-    same, and only its comparisons and its rendering are wrong.
+    Why it matters: every timestamp in the system is one read of this clock. A naive
+    `datetime.now()` type-checks and reaches both the `timestamptz` column and the
+    API looking identical; only its comparisons and its rendering are wrong.
     """
     now = SystemClock().now()
 

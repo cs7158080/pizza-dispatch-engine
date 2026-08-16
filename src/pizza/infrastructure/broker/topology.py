@@ -1,9 +1,10 @@
-"""The exchanges, queues and bindings, declared by both services from one function.
+"""Broker topology: the exchanges, queues and bindings, declared by both services.
 
-Declaring is idempotent, so neither depends on which started first. The two exchanges
-form the retry cycle: a rejected message waits in a queue that has no consumer until its
-time to live expires, then returns to the main exchange — the delay between dispatch
-attempts, with no timer of ours in it.
+Declaration is idempotent, so neither service depends on which started first.
+
+The two exchanges form the retry cycle: a rejected message waits in a queue with no
+consumer until its time to live expires, then dead-letters back to the main exchange.
+The delay between dispatch attempts is therefore the broker's, not a timer of ours.
 """
 
 from pika.adapters.blocking_connection import BlockingChannel
@@ -18,7 +19,7 @@ ORDER_READY_WAIT_KEY = "order.ready.wait"
 
 
 def wait_queue_arguments(retry_delay_seconds: int) -> dict[str, object]:
-    """The delay is configured in seconds and AMQP declares it in milliseconds."""
+    """Build the wait queue's arguments, converting the delay to milliseconds."""
     return {
         "x-message-ttl": retry_delay_seconds * 1000,
         "x-dead-letter-exchange": ORDERS_EXCHANGE,
@@ -27,10 +28,10 @@ def wait_queue_arguments(retry_delay_seconds: int) -> dict[str, object]:
 
 
 def declare(channel: BlockingChannel, retry_delay_seconds: int) -> None:
-    """Declare everything above, on every connection either service opens.
+    """Declare the exchanges, queues and bindings on the given channel.
 
-    Publishing to an exchange that does not exist closes the channel, so this runs
-    before the first publish and not only after a reconnection.
+    Publishing to an exchange that does not exist closes the channel, so this must
+    run on every connection, before the first publish.
     """
     channel.exchange_declare(ORDERS_EXCHANGE, exchange_type="direct", durable=True)
     channel.exchange_declare(RETRY_EXCHANGE, exchange_type="direct", durable=True)

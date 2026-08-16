@@ -1,15 +1,14 @@
-"""The loop a person types at, and the five things they can do.
+"""The interactive menu loop and its five actions.
 
-One order is remembered, by its identifier alone, for the life of the process.
-Every screen that shows it reads it again: the worker changes orders between
-actions, so a kept copy would be the one thing on the screen that could be wrong.
+One order is remembered, by identifier alone, for the life of the process. Every
+screen that shows it fetches it again, because the worker changes orders between
+actions and a cached copy would be stale.
 
-The status list is displayed and selected from. The number that picks from it comes
-from the keystroke alone and is never worked out from the status the order is on —
-the API decides which transition is legal and answers when it is not.
+The status list is only displayed and selected from. Which transition is legal is
+decided by the API, never derived here from the order's current status.
 
-Nothing typed here is checked before it is sent. A value the rules refuse comes
-back as an error the API describes, which is one round trip and one screen.
+Nothing typed here is validated before it is sent: a value the rules refuse comes
+back as an error the API describes.
 """
 
 from typing import Any
@@ -34,11 +33,10 @@ _ACTIONS = (
 
 
 def run_menu(api: ApiClient) -> None:
-    """Print the menu, run what was chosen, print it again.
+    """Run the menu until the user quits or input ends.
 
-    Reaching the end of input, by `quit` or by a closed stream, is an ordinary
-    exit: a container started without a terminal reads EOF at the first prompt,
-    and that is not a failure of anything.
+    End of input is an ordinary exit: a container started without a terminal reads
+    EOF at the first prompt, which is not a failure.
     """
     try:
         _loop(api)
@@ -91,10 +89,10 @@ def _register_driver(api: ApiClient) -> None:
 
 
 def _select_order(api: ApiClient) -> UUID | None:
-    """List the orders, and open the one that was picked.
+    """List the orders and open the one that was picked.
 
-    Selecting fetches the order, because the list carries no driver and the
-    number that picked it is regenerated on every listing.
+    Selection triggers a fetch, because the list carries no driver and the numbering
+    is regenerated on every listing.
     """
     orders = api.list_orders()
     if not orders:
@@ -174,9 +172,9 @@ def _driver(driver: dict[str, Any] | None) -> str:
 
 
 def _pick(label: str, count: int) -> int | None:
-    """One number from a list on the screen, or nothing.
+    """Read one number from the displayed list, or None.
 
-    An unusable answer prints a line and returns; it never becomes a request.
+    An unusable answer prints a note and returns None; it never becomes a request.
     """
     answer = _prompt(label)
     if not answer:

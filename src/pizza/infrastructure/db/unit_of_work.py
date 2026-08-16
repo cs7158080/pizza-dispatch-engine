@@ -1,10 +1,9 @@
-"""One transaction, and the repositories bound to it.
+"""SQLAlchemy unit of work: one transaction and the repositories bound to it.
 
-Each entry opens its own `Session` and each exit closes it, so the same instance can
-be used again after a commit — which is what the publish-then-mark sequence needs:
-the mark is a second transaction, taken after the first one has ended.
+Each entry opens its own `Session` and each exit closes it, so one instance can be
+re-entered after a commit to run a second transaction.
 
-Leaving the block without `commit()` rolls back.
+Leaving the block without calling `commit()` rolls back.
 """
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -34,14 +33,17 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
     def __exit__(self, *exc: object) -> None:
         if self._session is None:
             return
-        # A no-op once commit() has been called, and the whole of the guarantee
-        # otherwise.
+        # A no-op once commit() has been called; the rollback guarantee otherwise.
         self._session.rollback()
         self._session.close()
         self._session = None
 
     def commit(self) -> None:
-        """Raises TransactionFailed."""
+        """Commit the transaction.
+
+        Raises:
+            TransactionFailed: The transaction could not be committed.
+        """
         if self._session is None:
             raise RuntimeError("commit() outside the unit of work")
         try:
