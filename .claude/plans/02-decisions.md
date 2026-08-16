@@ -4188,10 +4188,15 @@ and Part 4 of `03-roadmap.md`).
   |---|---|
   | Retry budget exhausted, `assignment_state = FAILED` (F7 terminal) | a genuine risk, and the one tie the cost rule broke: 1.2's floor puts `TTL × cap` above 60 s and 11.6 gives the suite the shipped configuration, so it would add about a minute to **every** `docker compose up`. FW13 is where it becomes affordable |
   | Broker unreachable (F4), malformed message (F10) | 12.3 admits neither interface |
-  | Concurrent `PATCH` on one order (F14) | 6.9 is open — there is no decided behaviour to assert against |
+  | Concurrent `PATCH` on one order (F14) | 6.9 decided it, and the answer is a `409` — loud, by the criterion above. Asserting it also needs two genuinely simultaneous requests, so the test would turn on timing where §5 requires determinism |
   | Unknown order id (F1) | loud, and a single status code |
   | Database down mid-assignment (F5), worker crash before ack (F6) | both need process control; F6's partially-applied state is covered by 5.5's guard, which scenario 1 exercises |
   | The **ghost driver** (4.3) | the inventory flags it as a candidate, and it is not one: it is a **defect state, not a behaviour**. No sequence of legal calls produces it, so there is nothing for a test to drive. What is testable is that assignment writes both sides, which scenario 1 asserts |
+
+  *Corrected on 2026-08-16:* the F14 row read *"6.9 is open — there is no decided behaviour to
+  assert against"*. That was true when this item was written on 2026-08-10 and stopped being true
+  the next day, and the row was never revisited. The exclusion stands on the criterion above
+  instead, and the four scenarios are unchanged.
 
   *What this hands to 12.5, and it is a real problem rather than a formality:* scenario 1 ends
   with a released, `AVAILABLE` driver, while scenarios 2 and 3 both need scarcity. Run in that
