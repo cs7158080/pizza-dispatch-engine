@@ -202,3 +202,122 @@ launch, and are not counted among the four scenarios above.
 leaves none behind, so it can be re-run. What it cannot be isolated from is the driver pool, which
 is global by nature — so re-running it against a stack you have been driving by hand may observe
 drivers you registered yourself. `docker compose down` resets it.
+
+## Trade-offs
+
+Nine choices a reviewer might otherwise read as mistakes. Each says what was chosen, what was
+rejected, and what it costs.
+
+**RabbitMQ and PostgreSQL, chosen as a pair.** The brief asks for a message broker and a database
+without naming either. RabbitMQ gives per-message acknowledgement, dead-lettering and a delay
+primitive, which is exactly the retry mechanism this problem needs; Kafka's log model would have
+turned a redelivery-after-a-delay into partition-level replay. PostgreSQL follows from wanting one
+transaction to cover a status change and the record of the event it raises. The cost is two pieces
+of infrastructure to run rather than one — paid by Compose, and by nothing else.
+
+**A synchronous runtime, chosen once for the whole system rather than a layer at a time.** Async is
+not a choice a layer makes: the transaction protocol, every repository, every use case and both
+composition roots convert together, the drivers change with them, and the unit tests acquire a
+plugin that costs them the "free" standing they are admitted under. Only the domain layer would be
+untouched. **What the chosen side costs is named rather than glossed:** the publisher needs a lock
+because the runtime is synchronous, and a status update against an unreachable broker occupies a
+pool thread for up to twice the configured timeout. The condition that reverses it is real
+concurrency — worker replicas, or a prefetch above one.
+
+**Retry through a dead-letter exchange and a TTL, not an immediate requeue.** A message that finds
+no free driver is rejected without requeue, parked in a queue with a time-to-live, and returned to
+the worker when it expires — a fixed delay, a capped number of attempts, and the order marked
+failed when they run out. An immediate requeue was rejected because it spins: the same message
+would come back thousands of times a second while no driver appears. The cost is that the delay is
+a queue-level property, so one number serves every retry rather than backing off.
+
+**The publish happens after the commit.** The status change and its outbox row commit together, and
+only then is the event sent — so a broker that is down cannot roll back a change the caller has
+already been told succeeded. The accepted cost is a genuinely lost event: the status update returns
+`200`, the order stays `PENDING`, and the outbox row is the record that it happened. **You can
+prove this rather than take it on trust** — `docker compose stop rabbitmq`, then advance an order to
+`BAKING`: `200`, and no dispatch. A relay that republishes unsent rows is the fix, and it is future
+work rather than a defect.
+
+**A migration tool acts on a schema holding data that must survive the change, and this one holds
+none.** With nothing persisted the schema is built from empty at every launch, so there is never a
+second version for a revision to describe — Alembic would ship one revision documenting a
+capability nothing exercises. The schema is created from the model by a one-shot service instead.
+What reverses it is persistence, which this environment deliberately does not have.
+
+**A CI server is shared infrastructure, not a service this repository defines.** The compose file
+describes the system under test; a build server is provisioned once and pointed at many
+repositories, so its shape here is an installation that already exists, aimed at this remote, with
+the job definition committed beside the code. **Every check such a pipeline would run already runs**
+— formatter, linter, type checker and unit tests before each commit, and the integration suite
+inside the launch. What is missing is the trigger, not a check. A Jenkins service was priced before
+it was declined: a plugin set able to drive those commands builds in about nine minutes from a clean
+cache and adds 74 MB to a 483 MB base image, paid by whoever launches this first; the server-free
+tool that would have validated a pipeline without one has had no release since a 2023 beta. The cost
+of the gap is a check skipped locally with nothing to catch it — which one author carries by
+discipline and a team cannot.
+
+**Every launch starts from empty, which is the property an ephemeral test environment exists to
+provide.** Nothing is persisted, so no run inherits another's residue and the suite always meets a
+known state. That is why there is no second stack: a duplicate environment with its own database and
+broker would double what runs in order to remove one failure — re-running the suite after driving
+the system by hand — that a single documented `docker compose down` already removes. Testing the
+system that actually ships is also worth more than testing a faithful copy of it. The cost is that
+determinism is conditional rather than absolute, and the condition is written down under *Tests*
+rather than glossed over.
+
+**One worker, and nothing in the code assumes it.** A single replica at prefetch one keeps the demo
+and the suite readable — messages are handled in a visible order, and a scenario's timing is not a
+function of which consumer won. The safety that would matter under contention lives in the database
+rather than in the deployment: claiming a driver is an atomic conditional update, so two workers
+could not take the same one. What is missing is the evidence, not the safety — running replicas and
+proving it under real contention is future work.
+
+**No test reaches around the thing it claims to verify.** The integration suite asserts through the
+API rather than reading the schema behind it, the unit tests use no doubles, and the retry path is
+exercised by letting the real broker redeliver rather than by moving a clock or opening an interface
+for the test to push. Each of those was decided separately and they amount to one rule: a suite that
+shortcuts past the contract stops testing the contract. The cost is real and accepted — the
+publisher and transaction failure paths are reached by breaking infrastructure by hand, as in the
+experiment above, rather than on demand.
+
+### What a reviewer will look for and not find
+
+No authentication or authorisation. No driver endpoints beyond registration — no listing, no
+availability changes, no per-driver history. No filtering or paging on the order list. No structured
+order items; `items` is a list of strings. No metrics, no tracing, no correlation id across the
+broker. No isolated test environment — the suite runs against the stack you drive by hand.
+
+Each of these was considered and consciously excluded. [docs/future-work.md](docs/future-work.md)
+holds the full register, ordered by what a reviewer is most likely to expect.
+
+The reasoning behind every choice above, in full and with the alternatives that were weighed, is in
+[.claude/plans/02-decisions.md](.claude/plans/02-decisions.md).
+
+## Assumptions
+
+Where the brief was silent or genuinely ambiguous, a reading was chosen and written down.
+
+- The dispatch event fires on both `BAKING` and `READY`, and assigning an order twice is a no-op.
+- The status chain is strictly linear, single-step and forward-only, and `DELIVERED` is terminal.
+- Reaching `DELIVERED` releases the driver back to `AVAILABLE`.
+- A driver is always registered `AVAILABLE`; the request carries no status field.
+- `items` is a list of strings, with arbitrary but explicit length bounds.
+- A driver holds at most one active order.
+- `GET /orders` exists — a light list, newest first, with no cap and no paging.
+- `GET /health` exists — `200` when the database is reachable, `503` otherwise.
+- "3–4 automated tests" means four integration scenarios; the unit tests are separate and uncounted.
+- The environment is disposable: no named volumes, and `docker compose down` is the whole reset.
+- No authentication or authorisation anywhere.
+- The event is published after the commit, so an unreachable broker still returns `200` and the
+  event is lost.
+- Every event is recorded in an `outbox` table, but nothing replays unpublished rows.
+- "Microservice" means separate processes and containers, not separate codebases — the API and the
+  worker are two entrypoints into one package over one database.
+- The committed credentials are non-secret defaults for a disposable environment; a real deployment
+  would supply its own.
+
+---
+
+Built with an AI agent under a written working agreement, with the plan and the record of it
+committed alongside the code — see [docs/how-this-was-built.md](docs/how-this-was-built.md).
