@@ -22,7 +22,7 @@ Part 4 gives U9 the Dockerfiles, the compose services, the healthchecks and read
 the volumes, the ports and the restart policies. It is the unit that turns a package into a system
 that starts: after U8 every port had an implementation and nothing could be run.
 
-**It writes no Python.** Five files, none of them under `src/` or `tests/`:
+**The unit's own steps write no Python.** Five files, none of them under `src/` or `tests/`:
 
 | File | What it holds | Fixed by |
 |---|---|---|
@@ -31,6 +31,13 @@ that starts: after U8 every port had an implementation and nothing could be run.
 | `docker-compose.yml` | six services, three healthchecks, the graph, the ports, the policies | 11.1, 11.2, 11.8, 11.9, 11.10, 11.11, 10.1 |
 | `.env.example` | one added line, `API_HOST_PORT` | 11.8, which moved 10.3's count from ten to eleven |
 | `README.md` | two sections — how to run it, and why nothing persists | `CLAUDE.md` §7; 11.7 requires the second by name |
+
+**Two amendments did touch Python, and this sentence is narrowed rather than left to contradict the
+history under it.** Driving the environment by hand surfaced two defects in decided records that no
+reading would have found: 8.7 left the idempotent dispatch path silent while 1.2's step 10 sends a
+reviewer to watch for it, and 8.7 also refused to curate any library log level on the ground that
+such a list has no reader. Both are amendments listed in §3, each with the record it corrects — not
+step work, and not scope this unit claimed.
 
 **Six services, not seven, and the split is 11.1's own.** `tests` is written by U11: 12.9 fixes
 its command and carries *Realised in:* U11, 12.7 gives its `conftest.py` to U10, and
@@ -84,6 +91,7 @@ Each line names the item that owns it, so nothing here is silence.
 | 4 | step | `feat: define the cli service, reachable but never started by up` |
 | C | amendment | `fix: say when a repeated dispatch event changed nothing` |
 | D | amendment | `fix: stop pika narrating a successful reconnect at INFO` |
+| E | amendment | `fix: wait for the broker's port, not for its node` |
 
 ## 4. The Definition of Done that applies to every step
 

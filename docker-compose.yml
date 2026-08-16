@@ -26,7 +26,7 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-pizza}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-pizza}
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 5s
       timeout: 10s
       retries: 12

@@ -3482,7 +3482,7 @@ and Part 4 of `03-roadmap.md`).
   | Service | Test | Why this one |
   |---|---|---|
   | `postgres` | `pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"` | 6.6 named `pg_isready`; the `-h` is this item's |
-  | `rabbitmq` | `rabbitmq-diagnostics ping` | 6.6 |
+  | `rabbitmq` | `rabbitmq-diagnostics -q check_port_connectivity` | 6.6; the check narrowed at U9 |
   | `api` | `python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"` | 6.6's `/health`, called with what is already in the image |
 
   *Why `-h 127.0.0.1`, which is the finest detail in this item and the one that would have bitten.*
@@ -3504,6 +3504,33 @@ and Part 4 of `03-roadmap.md`).
   **What the numbers are recorded for is the `interval`:** the protection today is the flag *and* a
   probe cadence thirty times the window, so lowering `interval` toward 1 s walks the first probe
   into the hazard — which is not the sampling-rate change it looks like.
+  **The broker's check was `rabbitmq-diagnostics ping` until U9 ran it, and `ping` answers a
+  narrower question than the dependent asks — the same fault `-h` closes above, on the other
+  service.** The tool's own help states what it checks: *"that the node OS process is up,
+  registered with EPMD and CLI tools can authenticate with it"*. It says nothing about a listener,
+  and the AMQP listener opens well after the node is reachable.
+  *Measured from a cold start, sampling both checks in one loop:*
+
+  | | `ping` | `check_port_connectivity` |
+  |---|---|---|
+  | 02:49:15.958 | fails | fails |
+  | 02:49:18.459 | **passes** | fails |
+  | 02:49:23.696 | **passes** | fails |
+  | 02:49:25.375 | passes | passes — the log's `started TCP listener on [::]:5672` is 23:49:25.606 |
+
+  **Seven seconds in which `condition: service_healthy` releases a dependent onto a closed port.**
+  Unlike the postgres window above, which is 162 ms behind a 5 s interval and is never reached,
+  **this one was observed in the product**: the worker started early, took `ConnectionRefusedError`,
+  logged `event=broker_unreachable`, exited `1` and came back on 11.11's policy with
+  `RestartCount=1` — which is precisely the run of `ERROR` lines and the restart count this item
+  took the broker edge to prevent. It is intermittent because the worker also waits on `schema`, so
+  whether it loses depends on how fast postgres and the one-shot happen to be — 4.6's own warning
+  about a window that passes here and fails on the reviewer's machine.
+  `check_port_connectivity` is *"Basic TCP connectivity health check for each listener's port"* and
+  reports `Successfully connected to ports 5672, 15692, 25672`, which is the question the worker
+  asks. It costs 0.93–1.03 s against `ping`'s 0.78 s, inside the 10 s `timeout` below with room.
+  `-q` suppresses the tool's banner, which would otherwise land in the check's output.
+
   *Why the API's check is a `python -c` and not `curl`:* the base is `python:3.x-slim` (3.7), which
   ships no `curl`. The alternative is a package in the image every service ships, added for a
   diagnostic — against one line using the interpreter that is already the reason the image exists.
