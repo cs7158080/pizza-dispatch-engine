@@ -29,9 +29,9 @@ status markers, precisely so that this table cannot be contradicted.
 | 10 — Configuration | 10.1–10.5 | — |
 | 11 — Docker Compose | 11.1–11.11 | — |
 | 12 — Testing | 12.1, 12.2, 12.3, 12.6, 12.7, 12.9, 12.10 | 12.4, 12.5, 12.8 |
-| 13 — Documentation | 13.1–13.6 | — |
+| 13 — Documentation | 13.1–13.7 | — |
 | 14 — Git and process | 14.1–14.7 | — |
-| **Total** | **108** | **3** |
+| **Total** | **109** | **3** |
 
 Phase 3 for a unit does not begin while an item that unit depends on is open (`CLAUDE.md` §2,
 and Part 4 of `03-roadmap.md`).
@@ -4746,6 +4746,69 @@ and Part 4 of `03-roadmap.md`).
   following the pointer would have to leave the file that holds the answer.
   **Full paragraphs, as before** — the form that produced the drift.
   *Source:* `CLAUDE.md` §7. *Realised by:* the Assumptions section of this file.
+
+- **13.7 `docs/future-work.md`.** `[decided]`
+  *Decision:* **a reader's register of what was not built, ordered by what a reviewer would
+  expect to find.** Nineteen entries in two tiers, in `docs/` beside `ai-log.md` and
+  `how-this-was-built.md`, and linked once from the README's *Trade-offs* section (13.4).
+
+  *The rule that selects and orders it:* **would a competent engineer hold a standing
+  expectation that a production service has this, independent of this brief?** It asks about
+  professional norms rather than about this project, so a rank can be settled without arguing
+  taste. 13.4's rule — whether an absence reads as a mistake — breaks ties.
+  *Why not 13.4's rule alone:* it already selects the trade-off entries, and one rule governing
+  both documents would make the top of this file indistinguishable from the section a reviewer
+  has just finished reading.
+
+  | Tier | Entries | Form |
+  |---|---|---|
+  | 1 | FW9, FW19, FW16, FW6, FW13, FW2, FW12, FW4, FW17 | two to three lines — the thing, why it is not here, what taking it would need |
+  | 2 | FW5, FW11, FW3, FW7, FW14, FW1, FW15, FW8, FW10, FW18 | one line each |
+
+  *The tiers differ in depth, not in presence.* Every entry appears, and the second tier is a
+  scan rather than a read. *Rejected:* **nineteen entries at one weight** — the first tier earns
+  a reviewer's attention and the tail only has to prove the register is complete, which is 14.5's
+  warning about volume applied before it bites. **A cut at N, with the remainder unmentioned** —
+  §7 requires deliberate exclusions to be stated, and a tail of one-line entries states them at
+  almost no cost.
+
+  *FW17 is placed by hand, and the reason is named because a rule with a silent exception reads
+  as a rule broken.* Nobody holds a standing expectation about the bound on a publisher confirm,
+  so the test puts it in the second tier. What it carries is that the last phase of a publish is
+  bounded at about 65 s by `pika`'s heartbeat rather than by the five seconds 10.4 configures —
+  read out of `pika/heartbeat.py` rather than estimated — and why no code of ours can repair it
+  in place. **It is the entry that shows a timeout was traced instead of trusted**, which is
+  worth more than its rank. It joins the first tier last, displacing nothing that earned a place
+  there on the rule.
+
+  *Its relation to Part 5, and this is what keeps it a product rather than a second plan:*
+  Part 5 of `03-roadmap.md` stays the **complete original** — nineteen entries, unreordered, and
+  1.1 still sends every unbuilt candidate there before anything appears here. This file is a
+  derived view, per 1.4's *"a derived view, never a second original"*. Order is a property of
+  the view; the codes and their numbering stay with the source.
+
+  *Form, and it follows from who reads it:* **no `FW` code, and no sentence carried across.**
+  13.4 bars the codes from the README on the ground that they are internal and mean nothing to a
+  reader, which is as true one file away; and an entry quoted from Part 5 would arrive full of
+  item numbers written for the developer. Each entry is rewritten in its own words, and the join
+  back to its source is the title. **This record names the codes freely — the bar is on the file
+  a reviewer is handed, not on the record that defines it.**
+  *The cost that buys, stated rather than glossed:* a sentence of reasoning per entry can drift
+  from the entry it summarises, where 13.6 avoids drift by carrying no reasoning at all. The
+  mitigation here is the weaker one: each sentence states a structural fact — that no data
+  survives a launch, that the concurrency does not exist — which changes only when the design
+  does.
+
+  *Rejected — five items proposed for this file that no Part 5 entry holds:* JSON log output, a
+  drained shutdown on `SIGTERM`, a version on the message contract, an idempotency key on
+  `POST /orders`, and a history of status transitions. Each passes the rule above, and each would
+  have needed a Part 5 entry of its own first, per 1.1. None was taken: the register is a view of
+  what was already decided, and an entry decided in order to be listed inverts that.
+  *Rejected — a sixth, a unit set widened with test doubles:* its cost was accepted rather than
+  deferred (12.6, *"closed to accumulation, not to growth"*), and a register of things still
+  wanted is the wrong home for a closed decision. 13.4's entry 8 carries it instead.
+  *Source:* `CLAUDE.md` §7; DoD *Documentation*. *Constrained by:* 1.1, 1.4, 12.6, 13.4, 14.5.
+  *Realised in:* U13.
 
 
 ## Topic 14 — Git and process
